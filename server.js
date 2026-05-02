@@ -3970,10 +3970,65 @@ function killPortOccupant(port) {
   } catch { return false; }
 }
 
+function getPortOccupantPids(port) {
+  try {
+    const result = require('child_process').execSync(`lsof -ti :${port}`, { encoding: 'utf8' }).trim();
+    if (!result) return [];
+    return result.split('\n').map(Number).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function readProcessCommandLine(pid) {
+  try {
+    if (process.platform === 'linux') {
+      return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+    }
+  } catch {}
+  try {
+    return require('child_process').execSync(`ps -o command= -p ${pid}`, { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function isOwnedPortOccupant(pid) {
+  if (!pid || pid === process.pid) return false;
+  const cmdline = readProcessCommandLine(pid);
+  if (!cmdline) return false;
+  if (cmdline.includes(__filename)) return true;
+  if (!cmdline.includes('server.js')) return false;
+  try {
+    if (process.platform === 'linux') {
+      const cwd = fs.readlinkSync(`/proc/${pid}/cwd`);
+      return path.resolve(cwd) === path.resolve(__dirname);
+    }
+  } catch {}
+  return false;
+}
+
+function killOwnedPortOccupant(port) {
+  const pids = getPortOccupantPids(port);
+  if (pids.length === 0) return false;
+  const owned = pids.filter((pid) => isOwnedPortOccupant(pid));
+  if (owned.length === 0 || owned.length !== pids.length) return false;
+  for (const pid of owned) {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const remaining = getPortOccupantPids(port);
+    if (remaining.length === 0) return true;
+    require('child_process').execSync('sleep 0.2', { stdio: 'ignore' });
+  }
+  return getPortOccupantPids(port).length === 0;
+}
+
 function handleServerListenError(err) {
   if (err && err.code === 'EADDRINUSE') {
     plog('WARN', 'server_port_in_use_retry', { port: PORT, host: HOST });
-    if (ALLOW_PORT_KILL && killPortOccupant(PORT)) {
+    if (killOwnedPortOccupant(PORT) || (ALLOW_PORT_KILL && killPortOccupant(PORT))) {
       try { server.listen(PORT, HOST); } catch {}
       return;
     }
