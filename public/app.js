@@ -1328,7 +1328,7 @@
     const total = resolveContextWindowTokens(currentAgent, currentModel);
     let used = null;
     if (currentLastUsage) {
-      used = Number(currentLastUsage.inputTokens || 0) + Number(currentLastUsage.cachedInputTokens || 0);
+      used = Number(currentLastUsage.inputTokens || 0);
     }
     const usedText = used == null ? '?' : formatTokenCompact(used);
     const totalText = total == null ? '?' : formatTokenCompact(total);
@@ -1338,7 +1338,6 @@
   function formatTotalUsageText() {
     if (!currentTotalUsage) return '?';
     const total = Number(currentTotalUsage.inputTokens || 0)
-      + Number(currentTotalUsage.cachedInputTokens || 0)
       + Number(currentTotalUsage.outputTokens || 0);
     return formatTokenCompact(total);
   }

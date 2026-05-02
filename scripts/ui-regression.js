@@ -116,6 +116,21 @@ assert(
     /type:\s*'usage'[\s\S]*lastUsage/.test(runtimeJs),
   'runtime usage updates should distinguish current-context usage from cumulative totals'
 );
+const currentContextFormatter = appJs.match(/function\s+formatCurrentContextUsageText\(\)\s*\{([\s\S]*?)\n\s*\}/);
+assert(currentContextFormatter, 'current context usage formatter should exist');
+assert(
+  /currentLastUsage\.inputTokens/.test(currentContextFormatter[1]) &&
+    !/cachedInputTokens/.test(currentContextFormatter[1]),
+  'current context usage should use lastUsage.inputTokens only; cachedInputTokens is a subset, not an extra context count'
+);
+const totalUsageFormatter = appJs.match(/function\s+formatTotalUsageText\(\)\s*\{([\s\S]*?)\n\s*\}/);
+assert(totalUsageFormatter, 'total usage formatter should exist');
+assert(
+  /currentTotalUsage\.inputTokens/.test(totalUsageFormatter[1]) &&
+    /currentTotalUsage\.outputTokens/.test(totalUsageFormatter[1]) &&
+    !/cachedInputTokens/.test(totalUsageFormatter[1]),
+  'total usage should sum inputTokens and outputTokens only; cachedInputTokens is displayed as detail elsewhere and must not be double-counted'
+);
 assert(
   /composer-status-segment is-model/.test(appJs) &&
     /formatModelDisplay\(currentModel,\s*currentReasoningEffort\)/.test(appJs),
