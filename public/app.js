@@ -124,6 +124,7 @@
   let foregroundAnchorUntil = 0;
   let isUserAtMessagesBottom = true;
   let messagesWereNearBottomBeforeHidden = true;
+  let messagesWereNearBottomBeforeViewportChange = true;
   let sessionLoadRequestSeq = 0;
 
   // --- DOM ---
@@ -176,11 +177,25 @@
 
   function updateUserBottomState() {
     isUserAtMessagesBottom = isNearMessagesBottom();
-    if (!isUserAtMessagesBottom && Date.now() > foregroundAnchorUntil) clearViewportAnchorTimers();
+    if (!isUserAtMessagesBottom && Date.now() > foregroundAnchorUntil) {
+      messagesWereNearBottomBeforeViewportChange = false;
+      clearViewportAnchorTimers();
+    }
+  }
+
+  function captureViewportBottomIntent() {
+    messagesWereNearBottomBeforeViewportChange =
+      isUserAtMessagesBottom ||
+      isNearMessagesBottom() ||
+      document.activeElement === msgInput;
   }
 
   function handleViewportResize() {
-    const shouldKeepBottom = isUserAtMessagesBottom || isNearMessagesBottom() || document.activeElement === msgInput;
+    const shouldKeepBottom =
+      messagesWereNearBottomBeforeViewportChange ||
+      isUserAtMessagesBottom ||
+      isNearMessagesBottom() ||
+      document.activeElement === msgInput;
     setVH();
     if (!shouldKeepBottom) return;
     forceMessagesBottomAfterForeground();
@@ -209,6 +224,7 @@
 
   function cancelForegroundBottomAnchor() {
     foregroundAnchorUntil = 0;
+    messagesWereNearBottomBeforeViewportChange = false;
     clearViewportAnchorTimers();
   }
 
@@ -218,7 +234,10 @@
 
   setVH();
   window.addEventListener('resize', handleViewportResize);
-  window.addEventListener('orientationchange', () => setTimeout(handleViewportResize, 100));
+  window.addEventListener('orientationchange', () => {
+    captureViewportBottomIntent();
+    setTimeout(handleViewportResize, 100);
+  });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', handleViewportResize);
     window.visualViewport.addEventListener('scroll', handleViewportResize);
@@ -3497,7 +3516,10 @@
     }
   });
 
-  msgInput.addEventListener('focus', handleViewportResize);
+  msgInput.addEventListener('focus', () => {
+    captureViewportBottomIntent();
+    handleViewportResize();
+  });
 
   msgInput.addEventListener('keydown', (e) => {
     // Command menu navigation

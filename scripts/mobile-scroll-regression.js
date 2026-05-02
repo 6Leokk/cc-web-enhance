@@ -39,8 +39,16 @@ assert(
   'mobile keyboard/viewport resize handler is missing',
 );
 assert(
+  /function\s+captureViewportBottomIntent\(\)/.test(appJs),
+  'viewport change handling should capture bottom intent before orientation or viewport resize shifts scrollTop',
+);
+assert(
   /let\s+messagesWereNearBottomBeforeHidden\s*=\s*true/.test(appJs),
   'foreground restore must remember whether the chat was near bottom before the page was hidden',
+);
+assert(
+  /let\s+messagesWereNearBottomBeforeViewportChange\s*=\s*true/.test(appJs),
+  'orientation and viewport changes should remember pre-resize bottom intent separately from foreground restore',
 );
 assert(
   /let\s+isUserAtMessagesBottom\s*=\s*true/.test(appJs),
@@ -100,8 +108,16 @@ assert(
   'visualViewport resize must be handled for mobile keyboard changes',
 );
 assert(
-  /msgInput\.addEventListener\('focus'[\s\S]*handleViewportResize/.test(appJs),
+  /window\.addEventListener\('orientationchange'[\s\S]*captureViewportBottomIntent\(\)/.test(appJs),
+  'orientation changes should capture bottom intent before delayed bottom anchoring runs',
+);
+assert(
+  /msgInput\.addEventListener\('focus'[\s\S]*captureViewportBottomIntent\(\)[\s\S]*handleViewportResize/.test(appJs),
   'focusing the composer should schedule bottom anchoring before the keyboard settles',
+);
+assert(
+  /function\s+handleViewportResize\(\)[\s\S]*messagesWereNearBottomBeforeViewportChange[\s\S]*forceMessagesBottomAfterForeground\(\)/.test(appJs),
+  'viewport resize handling should reuse the pre-change bottom intent instead of only trusting the already-shifted scroll position',
 );
 assert(
   /function\s+scrollToBottom\(\)[\s\S]*isUserAtMessagesBottom\s*=\s*true/.test(appJs),
