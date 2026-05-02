@@ -75,6 +75,12 @@ assert(
   'header runtime badge indicator should animate only while running'
 );
 assert(
+  /\.input-wrapper\s*\{[\s\S]*align-items:\s*flex-end;/.test(styleCss) &&
+    /\.attach-btn\s*\{[\s\S]*width:\s*40px;[\s\S]*height:\s*40px;/.test(styleCss) &&
+    /#msg-input\s*\{[\s\S]*align-self:\s*center;/.test(styleCss),
+  'composer should keep the upload button fixed while centering the text input beside it'
+);
+assert(
   /function\s+broadcastBackgroundDone\(sessionId,\s*entry,\s*excludeWs\s*=\s*null\)/.test(serverJs) &&
     /broadcastBackgroundDone\(sessionId,\s*entry,\s*entry\.ws\)/.test(serverJs),
   'process completion should notify other connected clients even when one websocket receives the final stream'

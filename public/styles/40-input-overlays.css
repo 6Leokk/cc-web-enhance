@@ -163,6 +163,7 @@
 }
 #msg-input {
   flex: 1;
+  align-self: center;
   background: transparent;
   border: none;
   color: var(--text-primary);
