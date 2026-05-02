@@ -40,6 +40,9 @@ function assert(condition, message) {
 
 function sql(dbPath, statement) {
   const result = spawnSync('sqlite3', [dbPath, statement], { encoding: 'utf8' });
+  if (result.error && result.error.code === 'ENOENT') {
+    throw new Error('Full regression requires the sqlite3 CLI to be installed and available on PATH.');
+  }
   if (result.status !== 0) throw new Error(result.stderr || `sqlite3 failed: ${statement}`);
   return result.stdout.trim();
 }

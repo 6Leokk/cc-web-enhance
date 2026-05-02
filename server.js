@@ -42,6 +42,8 @@ const MODEL_CONFIG_PATH = path.join(CONFIG_DIR, 'model.json');
 const CODEX_CONFIG_PATH = path.join(CONFIG_DIR, 'codex.json');
 const UI_CONFIG_PATH = path.join(CONFIG_DIR, 'ui.json');
 const BANNED_IPS_PATH = path.join(CONFIG_DIR, 'banned_ips.json');
+const TRUST_PROXY = process.env.CC_WEB_TRUST_PROXY === '1';
+const ALLOW_PORT_KILL = process.env.CC_WEB_KILL_PORT_OCCUPANT === '1';
 
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -556,6 +558,23 @@ function isWhitelistedIP(ip) {
     || cleaned === '::1'
     || cleaned.startsWith('100.')
     || EXTRA_WHITELIST_IPS.has(cleaned);
+}
+
+function normalizeClientIP(ip) {
+  const cleaned = String(ip || '').trim().replace(/^::ffff:/, '');
+  return cleaned || null;
+}
+
+function getClientIP(req) {
+  const remoteAddress = normalizeClientIP(req?.socket?.remoteAddress || null);
+  if (!TRUST_PROXY) return remoteAddress;
+  const forwardedHeader = Array.isArray(req?.headers?.['x-forwarded-for'])
+    ? req.headers['x-forwarded-for'][0]
+    : req?.headers?.['x-forwarded-for'];
+  const forwardedFirst = typeof forwardedHeader === 'string'
+    ? normalizeClientIP(forwardedHeader.split(',')[0])
+    : null;
+  return forwardedFirst || remoteAddress;
 }
 
 function loadBannedIPs() {
@@ -1682,6 +1701,13 @@ function handleProcessComplete(sessionId, exitCode, signal) {
     }
   } catch {}
 
+  // Final read before completion classification so late-flushed runtime output
+  // is reflected in entry.fullText / toolCalls / usage when deciding success.
+  if (entry.tailer) {
+    entry.tailer.readNew();
+    entry.tailer.stop();
+  }
+
   contextLimitExceeded = isContextLimitError(entry.agent || 'claude', `${entry.fullText || ''}\n${stderrSnippet || ''}\n${entry.lastError || ''}`);
   const shouldTreatAsError = shouldTreatCompletionAsError(exitCode, signal, stderrSnippet, {
     hasResponseText: !!entry.fullText,
@@ -1708,12 +1734,6 @@ function handleProcessComplete(sessionId, exitCode, signal) {
     stderr: stderrSnippet || null,
     requestTooLarge: contextLimitExceeded,
   });
-
-  // Final read
-  if (entry.tailer) {
-    entry.tailer.readNew();
-    entry.tailer.stop();
-  }
 
   const pendingSlash = pendingSlashCommands.get(sessionId) || null;
   if (pendingSlash) pendingSlashCommands.delete(sessionId);
@@ -2027,9 +2047,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  const clientIP = forwarded ? forwarded.split(',')[0].trim()
-    : req.socket?.remoteAddress || null;
+  const clientIP = getClientIP(req);
 
   // Check if IP is banned
   if (clientIP && isBanned(clientIP)) {
@@ -3955,7 +3973,7 @@ function killPortOccupant(port) {
 function handleServerListenError(err) {
   if (err && err.code === 'EADDRINUSE') {
     plog('WARN', 'server_port_in_use_retry', { port: PORT, host: HOST });
-    if (killPortOccupant(PORT)) {
+    if (ALLOW_PORT_KILL && killPortOccupant(PORT)) {
       try { server.listen(PORT, HOST); } catch {}
       return;
     }
