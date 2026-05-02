@@ -714,6 +714,25 @@ function splitCodexModelSpec(model) {
   };
 }
 
+function normalizeReasoningEffort(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return ['medium', 'high', 'xhigh'].includes(raw) ? raw : '';
+}
+
+function readCodexReasoningEffortFromHome(homeDir) {
+  const base = String(homeDir || '').trim();
+  if (!base) return '';
+  try {
+    const configPath = path.join(base, 'config.toml');
+    if (!fs.existsSync(configPath)) return '';
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const match = raw.match(/^\s*model_reasoning_effort\s*=\s*"(medium|high|xhigh)"/im);
+    return normalizeReasoningEffort(match?.[1] || '');
+  } catch {
+    return '';
+  }
+}
+
 function normalizeCodexModelList(models, defaultModel = '') {
   const seen = new Set();
   const list = [];
@@ -1340,6 +1359,16 @@ function normalizeAgent(agent) {
 function normalizeSession(session) {
   if (!session || typeof session !== 'object') return session;
   session.agent = normalizeAgent(session.agent);
+  if (!Object.prototype.hasOwnProperty.call(session, 'reasoningEffort')) session.reasoningEffort = '';
+  session.reasoningEffort = normalizeReasoningEffort(session.reasoningEffort);
+  if (session.agent === 'codex' && session.model) {
+    const parsed = splitCodexModelSpec(session.model);
+    if (parsed.reasoning && !session.reasoningEffort) session.reasoningEffort = parsed.reasoning;
+    session.model = parsed.base || parsed.raw || session.model;
+  }
+  if (session.agent === 'codex' && !session.reasoningEffort && session.codexHomeDir) {
+    session.reasoningEffort = readCodexReasoningEffortFromHome(session.codexHomeDir);
+  }
   if (!Object.prototype.hasOwnProperty.call(session, 'claudeSessionId')) session.claudeSessionId = null;
   if (!Object.prototype.hasOwnProperty.call(session, 'codexThreadId')) session.codexThreadId = null;
   if (!Object.prototype.hasOwnProperty.call(session, 'codexHomeDir')) session.codexHomeDir = '';
@@ -1415,6 +1444,16 @@ function modelShortName(fullModel) {
 function sessionModelLabel(session) {
   if (!session?.model) return null;
   return isClaudeSession(session) ? (modelShortName(session.model) || session.model) : session.model;
+}
+
+function sessionReasoningEffort(session) {
+  return isClaudeSession(session) ? '' : normalizeReasoningEffort(session?.reasoningEffort);
+}
+
+function sessionModelDisplay(session) {
+  const model = sessionModelLabel(session);
+  const reasoningEffort = sessionReasoningEffort(session);
+  return reasoningEffort ? `${model}(${reasoningEffort})` : model;
 }
 
 function parseGitNumstat(text) {
@@ -1531,6 +1570,16 @@ function splitHistoryMessages(messages) {
     olderChunks.push(older.slice(start, end));
   }
   return { recentMessages, olderChunks };
+}
+
+function staticCacheControl(filePath) {
+  const base = path.basename(filePath);
+  if (base === 'index.html' || base === 'sw.js') return 'no-cache';
+  return 'public, max-age=0, must-revalidate';
+}
+
+function buildStaticEtag(stat) {
+  return `W/"${Number(stat.size || 0).toString(16)}-${Math.floor(Number(stat.mtimeMs || 0)).toString(16)}"`;
 }
 
 const IS_WIN = process.platform === 'win32';
@@ -2132,17 +2181,32 @@ const server = http.createServer((req, res) => {
     return res.end('Forbidden');
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
+  fs.stat(filePath, (statErr, stat) => {
+    if (statErr || !stat.isFile()) {
       res.writeHead(404);
       return res.end('Not Found');
     }
     const ext = path.extname(filePath);
-    res.writeHead(200, {
+    const etag = buildStaticEtag(stat);
+    const cacheControl = staticCacheControl(filePath);
+    const commonHeaders = {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cacheControl,
+      'ETag': etag,
+      'Last-Modified': stat.mtime.toUTCString(),
+    };
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, commonHeaders);
+      return res.end();
+    }
+    fs.readFile(filePath, (readErr, data) => {
+      if (readErr) {
+        res.writeHead(404);
+        return res.end('Not Found');
+      }
+      res.writeHead(200, commonHeaders);
+      res.end(data);
     });
-    res.end(data);
   });
 });
 
@@ -2721,6 +2785,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
           title: session.title,
           mode: session.permissionMode || 'yolo',
           model: sessionModelLabel(session),
+          reasoningEffort: sessionReasoningEffort(session),
           agent: getSessionAgent(session),
           cwd: session.cwd || null,
           totalCost: session.totalCost || 0,
@@ -2740,17 +2805,20 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
       const modelInput = parts[1];
       if (agent === 'codex') {
         if (!modelInput) {
-          const current = session?.model || resolveDefaultCodexModel() || '配置默认模型';
+          const current = session ? sessionModelDisplay(session) : (resolveDefaultCodexModel() || '配置默认模型');
           wsSend(ws, { type: 'system_message', message: `当前 Codex 模型: ${current}\n用法: /model <模型名>` });
         } else {
+          const modelSpec = splitCodexModelSpec(modelInput);
+          const displayModel = modelSpec.reasoning ? `${modelSpec.base}(${modelSpec.reasoning})` : (modelSpec.base || modelInput);
           if (session) {
-            session.model = modelInput;
+            session.model = modelSpec.base || modelInput;
+            session.reasoningEffort = modelSpec.reasoning;
             session.updated = new Date().toISOString();
             saveSession(session);
             sendWorkspaceStatus(ws, session.id, session);
           }
-          wsSend(ws, { type: 'model_changed', model: modelInput });
-          wsSend(ws, { type: 'system_message', message: `Codex 模型已切换为: ${modelInput}` });
+          wsSend(ws, { type: 'model_changed', model: modelSpec.base || modelInput, reasoningEffort: modelSpec.reasoning });
+          wsSend(ws, { type: 'system_message', message: `Codex 模型已切换为: ${displayModel}` });
         }
       } else if (!modelInput) {
         const current = session?.model ? modelShortName(session.model) || session.model : 'opus (默认)';
@@ -2767,7 +2835,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
             saveSession(session);
             sendWorkspaceStatus(ws, session.id, session);
           }
-          wsSend(ws, { type: 'model_changed', model: modelKey });
+          wsSend(ws, { type: 'model_changed', model: modelKey, reasoningEffort: '' });
           wsSend(ws, { type: 'system_message', message: `模型已切换为: ${modelKey}` });
         }
       }
@@ -2964,6 +3032,7 @@ function handleNewSession(ws, msg) {
   }
 
   const id = crypto.randomUUID();
+  const defaultCodexModel = splitCodexModelSpec(resolveDefaultCodexModel());
   const session = {
     id,
     title: 'New Chat',
@@ -2972,7 +3041,8 @@ function handleNewSession(ws, msg) {
     agent,
     claudeSessionId: null,
     codexThreadId: null,
-    model: agent === 'codex' ? resolveDefaultCodexModel() : MODEL_MAP.opus,
+    model: agent === 'codex' ? (defaultCodexModel.base || DEFAULT_CODEX_MODEL) : MODEL_MAP.opus,
+    reasoningEffort: agent === 'codex' ? defaultCodexModel.reasoning : '',
     permissionMode: requestedMode,
     totalCost: 0,
     totalUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
@@ -2992,6 +3062,7 @@ function handleNewSession(ws, msg) {
     title: session.title,
     mode: session.permissionMode,
     model: sessionModelLabel(session),
+    reasoningEffort: sessionReasoningEffort(session),
     agent,
     cwd: session.cwd,
     totalCost: 0,
@@ -3075,6 +3146,7 @@ function handleLoadSession(ws, sessionId, requestId = '') {
     title: session.title,
     mode: session.permissionMode || 'yolo',
     model: sessionModelLabel(session),
+    reasoningEffort: sessionReasoningEffort(session),
     agent: getSessionAgent(session),
     hasUnread: hadUnread,
 	    cwd: effectiveCwd,
@@ -3323,6 +3395,7 @@ function handleMessage(ws, msg, options = {}) {
     const id = crypto.randomUUID();
     const agent = normalizeAgent(msg.agent);
     const resolvedCwd = agent === 'claude' ? (process.env.HOME || process.env.USERPROFILE || process.cwd()) : null;
+    const defaultCodexModel = splitCodexModelSpec(resolveDefaultCodexModel());
 	    session = {
 	      id,
 	      title: derivedTitle,
@@ -3331,7 +3404,8 @@ function handleMessage(ws, msg, options = {}) {
 	      agent,
 	      claudeSessionId: null,
 	      codexThreadId: null,
-	      model: agent === 'codex' ? resolveDefaultCodexModel() : null,
+	      model: agent === 'codex' ? (defaultCodexModel.base || DEFAULT_CODEX_MODEL) : null,
+        reasoningEffort: agent === 'codex' ? defaultCodexModel.reasoning : '',
 		      permissionMode: mode || 'yolo',
 		      totalCost: 0,
 		      totalUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
@@ -3384,6 +3458,7 @@ function handleMessage(ws, msg, options = {}) {
       title: session.title,
       mode: session.permissionMode || 'yolo',
       model: sessionModelLabel(session),
+      reasoningEffort: sessionReasoningEffort(session),
       agent: getSessionAgent(session),
       cwd: session.cwd || null,
       totalCost: session.totalCost || 0,
@@ -3881,6 +3956,7 @@ function handleImportNativeSession(ws, msg) {
     title: session.title,
     mode: session.permissionMode,
     model: sessionModelLabel(session),
+    reasoningEffort: sessionReasoningEffort(session),
     agent: getSessionAgent(session),
     cwd: session.cwd,
     totalCost: session.totalCost || 0,
@@ -3968,7 +4044,8 @@ function handleImportCodexSession(ws, msg) {
     codexThreadId: threadId,
     importedFrom: 'codex',
     importedRolloutPath: parsed.filePath,
-    model: existingSession?.model || null,
+    model: parsed.meta.model || existingSession?.model || null,
+    reasoningEffort: parsed.meta.reasoningEffort || existingSession?.reasoningEffort || '',
     permissionMode: existingSession?.permissionMode || 'yolo',
     totalCost: existingSession?.totalCost || 0,
     totalUsage: parsed.totalUsage || existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
@@ -3986,6 +4063,7 @@ function handleImportCodexSession(ws, msg) {
     title: session.title,
     mode: session.permissionMode,
     model: sessionModelLabel(session),
+    reasoningEffort: sessionReasoningEffort(session),
     agent: getSessionAgent(session),
     cwd: session.cwd,
     totalCost: session.totalCost || 0,

@@ -20,6 +20,9 @@
 - 2026-05-02 顶部会话状态位与路径展示调整
 - 2026-05-02 输入框与上传按钮垂直对齐修复
 - 2026-05-02 输入框下方状态栏
+- 2026-05-02 局域网刷新性能优化
+- 2026-05-02 Codex 思考强度结构化显示
+- 2026-05-02 前台恢复滚动意图收紧
 - 2026-05-02 服务重启后的分段与刷新端到端复核
 - 回归脚本与验证命令
 
@@ -293,6 +296,72 @@
 - `public/styles/40-input-overlays.css`
 - `server.js`
 - `scripts/ui-regression.js`
+
+## 2026-05-02 局域网刷新性能优化
+
+新增或调整点：
+
+- 浏览器关键启动依赖不再从公共 CDN 拉取。
+- 新增本地 vendor 资源：
+  - `marked`
+  - `highlight.js`
+  - `atom-one-dark` 样式
+  - `DOMPurify`
+- `index.html` 继续使用 `no-cache`，确保部署变更能被立即发现。
+- 非 shell 静态资源改为验证型缓存：
+  - 返回 `ETag`
+  - 返回 `Last-Modified`
+  - 使用 `public, max-age=0, must-revalidate`
+- 局域网内重复刷新时，浏览器可通过条件请求避免不必要的完整资源传输。
+
+相关文件：
+
+- `public/index.html`
+- `public/vendor/*`
+- `server.js`
+- `scripts/ui-regression.js`
+
+## 2026-05-02 Codex 思考强度结构化显示
+
+新增或调整点：
+
+- `reasoningEffort` 从“拼在 model 字符串里”改为独立结构化字段。
+- `session_info` 与 `model_changed` 会向前端单独传递：
+  - `model`
+  - `reasoningEffort`
+- 前端统一通过格式化函数在展示层组合成：
+  - `gpt-5.4(xhigh)`
+- 旧会话兼容处理：
+  - 如果旧会话里仍保存成 `gpt-5.4(xhigh)`，会在服务端自动拆分
+  - 如果会话文件缺少 `reasoningEffort`，但 `codexHomeDir/config.toml` 中存在 `model_reasoning_effort`，也会在加载时补出该字段
+- Codex rollout 导入新增 `turn_context` 解析，可从历史中恢复 `model` 与 `reasoningEffort`
+- Codex CLI 启动改为：
+  - `--model <base model>`
+  - 独立 `model_reasoning_effort="<level>"`
+
+相关文件：
+
+- `server.js`
+- `lib/agent-runtime.js`
+- `lib/codex-rollouts.js`
+- `public/app.js`
+- `scripts/ui-regression.js`
+
+## 2026-05-02 前台恢复滚动意图收紧
+
+新增或调整点：
+
+- 前台恢复新增独立意图标记：`shouldAnchorBottomOnForegroundReturn`
+- 页面进入后台时，是否应在回前台后强制回到底部，只由“隐藏前是否在底部”决定
+- 不再把 `msgInput` 焦点当成前台恢复时必须回到底部的强信号
+- `pageshow` 和 `visibilitychange` 在恢复时都使用这条独立意图，而不是继续混用宽泛的焦点/视口判断
+- 保留原有移动端底部锚定能力，但减少“从其他 App 切回浏览器时误跳历史/误吸到底部”的概率
+
+相关文件：
+
+- `public/app.js`
+- `scripts/foreground-restore-regression.js`
+- `scripts/mobile-scroll-regression.js`
 
 ## 工具调用展示与折叠
 

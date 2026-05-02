@@ -10,6 +10,7 @@ const appJs = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const runtimeJs = fs.readFileSync(path.join(root, 'lib', 'agent-runtime.js'), 'utf8');
 const styleCss = readPublicCss(root);
+const indexHtml = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -117,8 +118,31 @@ assert(
 );
 assert(
   /composer-status-segment is-model/.test(appJs) &&
-    /String\(currentModel \|\| ''\)\.trim\(\) \|\| 'unknown-model'/.test(appJs),
+    /formatModelDisplay\(currentModel,\s*currentReasoningEffort\)/.test(appJs),
   'composer status line should render the full current model string as the leading segment'
+);
+assert(
+  /reasoningEffort:\s*payload\.reasoningEffort\s*\|\|\s*''/.test(appJs) &&
+    /reasoningEffort:\s*sessionReasoningEffort\(session\)/.test(serverJs) &&
+    /type:\s*'model_changed'[\s\S]*reasoningEffort/.test(serverJs) &&
+    /function\s+formatModelDisplay\(/.test(appJs),
+  'structured reasoningEffort should flow from the server into a dedicated UI model formatter'
+);
+assert(
+  !/cdnjs\.cloudflare\.com/.test(indexHtml) &&
+    !/cdn\.jsdelivr\.net/.test(indexHtml) &&
+    /vendor\/marked\.min\.js/.test(indexHtml) &&
+    /vendor\/highlight\.min\.js/.test(indexHtml) &&
+    /vendor\/highlight-atom-one-dark\.min\.css/.test(indexHtml) &&
+    /vendor\/purify\.min\.js/.test(indexHtml),
+  'critical browser dependencies should be served from local vendor assets instead of public CDNs'
+);
+assert(
+  /if-none-match/i.test(serverJs) &&
+    /ETag/.test(serverJs) &&
+    /max-age=31536000|must-revalidate/.test(serverJs) &&
+    /index\.html/.test(serverJs),
+  'static asset delivery should distinguish shell caching from local asset validation'
 );
 assert(
   /function\s+broadcastBackgroundDone\(sessionId,\s*entry,\s*excludeWs\s*=\s*null\)/.test(serverJs) &&

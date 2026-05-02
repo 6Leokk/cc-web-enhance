@@ -102,6 +102,7 @@
   let cmdMenuIndex = -1;
   let currentMode = 'yolo';
   let currentModel = 'opus';
+  let currentReasoningEffort = '';
   let currentAgent = AGENT_LABELS[localStorage.getItem('cc-web-agent')] ? localStorage.getItem('cc-web-agent') : DEFAULT_AGENT;
   let currentTheme = normalizeTheme(localStorage.getItem('cc-web-theme') || 'system');
   let codexConfigCache = null;
@@ -128,6 +129,7 @@
   let viewportAnchorTimers = [];
   let foregroundAnchorUntil = 0;
   let isUserAtMessagesBottom = true;
+  let shouldAnchorBottomOnForegroundReturn = false;
   let messagesWereNearBottomBeforeHidden = true;
   let messagesWereNearBottomBeforeViewportChange = true;
   let sessionLoadRequestSeq = 0;
@@ -192,16 +194,14 @@
   function captureViewportBottomIntent() {
     messagesWereNearBottomBeforeViewportChange =
       isUserAtMessagesBottom ||
-      isNearMessagesBottom() ||
-      document.activeElement === msgInput;
+      isNearMessagesBottom();
   }
 
   function handleViewportResize() {
     const shouldKeepBottom =
       messagesWereNearBottomBeforeViewportChange ||
       isUserAtMessagesBottom ||
-      isNearMessagesBottom() ||
-      document.activeElement === msgInput;
+      isNearMessagesBottom();
     setVH();
     if (!shouldKeepBottom) return;
     forceMessagesBottomAfterForeground();
@@ -230,6 +230,7 @@
 
   function cancelForegroundBottomAnchor() {
     foregroundAnchorUntil = 0;
+    shouldAnchorBottomOnForegroundReturn = false;
     messagesWereNearBottomBeforeViewportChange = false;
     clearViewportAnchorTimers();
   }
@@ -880,6 +881,7 @@
       title: snapshot.title || '',
       mode: snapshot.mode || '',
       model: snapshot.model || '',
+      reasoningEffort: snapshot.reasoningEffort || '',
       agent: snapshot.agent || '',
       cwd: snapshot.cwd || '',
       workspaceStatus: snapshot.workspaceStatus || null,
@@ -895,6 +897,7 @@
       title: payload.title || '新会话',
       mode: payload.mode || 'yolo',
       model: payload.model || '',
+      reasoningEffort: payload.reasoningEffort || '',
       agent: normalizeAgent(payload.agent),
       hasUnread: !!payload.hasUnread,
       cwd: payload.cwd || null,
@@ -1276,6 +1279,13 @@
     return String(num);
   }
 
+  function formatModelDisplay(model, reasoningEffort) {
+    const base = String(model || '').trim();
+    const effort = String(reasoningEffort || '').trim().toLowerCase();
+    if (!base) return 'unknown-model';
+    return effort ? `${base}(${effort})` : base;
+  }
+
   function formatWorkspacePath(pathValue) {
     const raw = String(pathValue || '').trim();
     if (!raw) return 'no-cwd';
@@ -1349,7 +1359,7 @@
       composerStatusline.innerHTML = '';
       return;
     }
-    const modelText = String(currentModel || '').trim() || 'unknown-model';
+    const modelText = formatModelDisplay(currentModel, currentReasoningEffort);
     const cwdText = formatWorkspacePath(resolveComposerCwd());
     const contextText = formatCurrentContextUsageText();
     const totalUsageText = formatTotalUsageText();
@@ -1457,6 +1467,7 @@
     currentRemoteCwd = '';
     setCurrentSessionRunningState(false);
     currentModel = currentAgent === 'claude' ? 'opus' : '';
+    currentReasoningEffort = '';
     isGenerating = false;
     pendingText = '';
     pendingFinalAssistantMessages = null;
@@ -1506,6 +1517,7 @@
       localStorage.setItem(getAgentModeStorageKey(currentAgent), currentMode);
     }
     currentModel = snapshot.model || '';
+    currentReasoningEffort = snapshot.reasoningEffort || '';
     renderComposerStatusline();
     if (!preserveStreaming) {
       renderMessages(snapshot.messages || [], { immediate: !!options.immediate });
@@ -2094,8 +2106,12 @@
       case 'model_changed':
         if (msg.model) {
           currentModel = msg.model;
+          currentReasoningEffort = msg.reasoningEffort || '';
           if (currentSessionId) {
-            updateCachedSession(currentSessionId, (snapshot) => { snapshot.model = msg.model; });
+            updateCachedSession(currentSessionId, (snapshot) => {
+              snapshot.model = msg.model;
+              snapshot.reasoningEffort = msg.reasoningEffort || '';
+            });
           }
           renderComposerStatusline();
         }
@@ -3484,7 +3500,7 @@
 
 	  function showModelPicker() {
 	    if (currentAgent === 'codex') {
-	      const current = _splitCodexThinkingModel(currentModel || '');
+	      const current = { base: String(currentModel || '').trim(), level: String(currentReasoningEffort || '').trim().toLowerCase() };
 	      const baseOptions = getCodexBaseModelOptions();
 	      if (baseOptions.length === 0) {
 	        appendSystemMessage('当前 Codex Profile 未配置 /model 候选列表。请先在设置 -> Codex API 配置中填写模型列表，或直接输入 /model <模型名>。');
@@ -5555,6 +5571,7 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       messagesWereNearBottomBeforeHidden = isUserAtMessagesBottom || isNearMessagesBottom();
+      shouldAnchorBottomOnForegroundReturn = messagesWereNearBottomBeforeHidden;
       return;
     }
     if (document.visibilityState !== 'visible') return;
@@ -5574,7 +5591,7 @@
         send({ type: 'list_sessions' });
       }
     }
-    if (messagesWereNearBottomBeforeHidden) {
+    if (shouldAnchorBottomOnForegroundReturn) {
       forceMessagesBottomAfterForeground();
     } else {
       handleViewportResize();
@@ -5583,10 +5600,11 @@
 
   window.addEventListener('pagehide', () => {
     messagesWereNearBottomBeforeHidden = isUserAtMessagesBottom || isNearMessagesBottom();
+    shouldAnchorBottomOnForegroundReturn = messagesWereNearBottomBeforeHidden;
   });
 
   window.addEventListener('pageshow', () => {
-    if (messagesWereNearBottomBeforeHidden) {
+    if (shouldAnchorBottomOnForegroundReturn) {
       forceMessagesBottomAfterForeground();
     }
   });
