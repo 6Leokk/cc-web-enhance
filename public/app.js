@@ -116,6 +116,10 @@
   let uploadingAttachments = [];
   let loginPasswordValue = ''; // store login password for force-change flow
   let currentCwd = null;
+  let currentWorkspaceStatus = null;
+  let currentTotalUsage = null;
+  let currentTaskMode = 'local';
+  let currentRemoteCwd = '';
   let currentSessionRunning = false;
   let skipDeleteConfirm = localStorage.getItem('cc-web-skip-delete-confirm') === '1';
   let pendingInitialSessionLoad = false;
@@ -156,6 +160,7 @@
   const attachmentTray = $('#attachment-tray');
   const imageUploadInput = $('#image-upload-input');
   const attachBtn = $('#attach-btn');
+  const composerStatusline = $('#composer-statusline');
   const messagesDiv = $('#messages');
   const msgInput = $('#msg-input');
   const inputWrapper = msgInput.closest('.input-wrapper');
@@ -876,6 +881,7 @@
       model: snapshot.model || '',
       agent: snapshot.agent || '',
       cwd: snapshot.cwd || '',
+      workspaceStatus: snapshot.workspaceStatus || null,
       updated: snapshot.updated || '',
     }).length;
     return base + (snapshot.messages || []).reduce((sum, message) => sum + estimateSessionMessageWeight(message), 0);
@@ -893,8 +899,11 @@
       cwd: payload.cwd || null,
       totalCost: typeof payload.totalCost === 'number' ? payload.totalCost : 0,
       totalUsage: payload.totalUsage ? deepClone(payload.totalUsage) : null,
+      workspaceStatus: payload.workspaceStatus ? deepClone(payload.workspaceStatus) : null,
       updated: payload.updated || null,
       isRunning: !!payload.isRunning,
+      taskMode: payload.taskMode || 'local',
+      remoteCwd: payload.remoteCwd || '',
       historyPending: !!payload.historyPending,
       complete: options.complete !== undefined ? !!options.complete : !payload.historyPending,
     };
@@ -1251,6 +1260,101 @@
     chatTitle.title = [titleText, currentCwd].filter(Boolean).join('\n');
   }
 
+  function formatTokenCompact(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return '?';
+    if (num >= 1_000_000) {
+      const millions = num / 1_000_000;
+      return Number.isInteger(millions) ? `${millions}M` : `${millions.toFixed(1)}M`;
+    }
+    if (num >= 1_000) {
+      const thousands = num / 1_000;
+      return Number.isInteger(thousands) ? `${thousands}k` : `${thousands.toFixed(1)}k`;
+    }
+    return String(num);
+  }
+
+  function formatWorkspacePath(pathValue) {
+    const raw = String(pathValue || '').trim();
+    if (!raw) return 'no-cwd';
+    const normalized = raw.replace(/\/+$/, '') || raw;
+    const homeDir = (window.__CC_HOME_DIR__ || '').trim();
+    if (homeDir && normalized.startsWith(homeDir)) {
+      const suffix = normalized.slice(homeDir.length).replace(/^\/+/, '');
+      return suffix ? `~/${suffix}` : '~';
+    }
+    const parts = normalized.split('/').filter(Boolean);
+    if (normalized.startsWith('/')) {
+      return parts.length > 2 ? `/${parts.slice(-2).join('/')}` : normalized;
+    }
+    return parts.length > 2 ? parts.slice(-2).join('/') : normalized;
+  }
+
+  function resolveComposerCwd() {
+    if (currentTaskMode === 'remote' && currentRemoteCwd) return currentRemoteCwd;
+    return currentCwd;
+  }
+
+  function resolveContextWindowTokens(agent = currentAgent, model = currentModel) {
+    const normalizedAgent = normalizeAgent(agent);
+    const raw = String(model || '').trim().toLowerCase();
+    if (!raw) return null;
+    if (normalizedAgent === 'claude') {
+      if (raw === 'opus' || raw === 'sonnet' || raw.endsWith('[1m]')) return 1_000_000;
+      return null;
+    }
+    if (normalizedAgent === 'codex') {
+      if (raw.startsWith('gpt-5.4')) return 1_000_000;
+      return null;
+    }
+    return null;
+  }
+
+  function formatContextUsageText() {
+    const total = resolveContextWindowTokens(currentAgent, currentModel);
+    let used = null;
+    if (currentAgent === 'codex') {
+      used = Number(currentTotalUsage?.inputTokens || 0);
+    } else if (currentTotalUsage && Number(currentTotalUsage.inputTokens || 0) > 0) {
+      used = Number(currentTotalUsage.inputTokens || 0);
+    }
+    const usedText = used == null ? '?' : formatTokenCompact(used);
+    const totalText = total == null ? '?' : formatTokenCompact(total);
+    return `${usedText} / ${totalText}`;
+  }
+
+  function formatWorkspaceGitText() {
+    const git = currentWorkspaceStatus?.git || null;
+    if (!git?.available) {
+      return git?.taskMode === 'remote' ? 'remote' : 'no-git';
+    }
+    const branch = git.branch || 'HEAD';
+    return `${branch} (+${git.addedLines || 0} -${git.deletedLines || 0})`;
+  }
+
+  function renderComposerStatusline() {
+    if (!composerStatusline) return;
+    if (!currentSessionId) {
+      composerStatusline.hidden = true;
+      composerStatusline.innerHTML = '';
+      return;
+    }
+    const modelText = String(currentModel || '').trim() || 'unknown-model';
+    const cwdText = formatWorkspacePath(resolveComposerCwd());
+    const contextText = formatContextUsageText();
+    const gitText = formatWorkspaceGitText();
+    composerStatusline.innerHTML = [
+      `<span class="composer-status-segment is-model">${escapeHtml(modelText)}</span>`,
+      `<span class="composer-status-separator">|</span>`,
+      `<span class="composer-status-segment is-cwd">${escapeHtml(cwdText)}</span>`,
+      `<span class="composer-status-separator">|</span>`,
+      `<span class="composer-status-segment is-context">${escapeHtml(contextText)}</span>`,
+      `<span class="composer-status-separator">|</span>`,
+      `<span class="composer-status-segment is-git">${escapeHtml(gitText)}</span>`,
+    ].join('');
+    composerStatusline.hidden = false;
+  }
+
   function updateCwdBadge() {
     if (chatCwd) {
       if (currentCwd) {
@@ -1265,6 +1369,7 @@
       chatCwd.hidden = true;
     }
     updateChatTitleMeta();
+    renderComposerStatusline();
   }
 
   function updateChatRuntimeStateBadge() {
@@ -1332,6 +1437,10 @@
     loadedHistorySessionId = null;
     clearSessionLoading();
     currentCwd = null;
+    currentWorkspaceStatus = null;
+    currentTotalUsage = null;
+    currentTaskMode = 'local';
+    currentRemoteCwd = '';
     setCurrentSessionRunningState(false);
     currentModel = currentAgent === 'claude' ? 'opus' : '';
     isGenerating = false;
@@ -1348,6 +1457,7 @@
     messagesDiv.innerHTML = buildWelcomeMarkup(currentAgent);
     setStatsDisplay(null);
     renderPendingAttachments();
+    renderComposerStatusline();
     highlightActiveSession();
   }
 
@@ -1371,6 +1481,9 @@
     setCurrentSessionRunningState(snapshot.isRunning);
     setStatsDisplay(snapshot);
     currentCwd = snapshot.cwd || null;
+    currentWorkspaceStatus = snapshot.workspaceStatus ? deepClone(snapshot.workspaceStatus) : null;
+    currentTaskMode = snapshot.taskMode || 'local';
+    currentRemoteCwd = snapshot.remoteCwd || '';
     updateCwdBadge();
     if (snapshot.mode && MODE_LABELS[snapshot.mode]) {
       currentMode = snapshot.mode;
@@ -1378,6 +1491,7 @@
       localStorage.setItem(getAgentModeStorageKey(currentAgent), currentMode);
     }
     currentModel = snapshot.model || '';
+    renderComposerStatusline();
     if (!preserveStreaming) {
       renderMessages(snapshot.messages || [], { immediate: !!options.immediate });
     }
@@ -1569,6 +1683,7 @@
   }
 
   function setStatsDisplay(msg) {
+    currentTotalUsage = msg?.totalUsage ? deepClone(msg.totalUsage) : null;
     if (currentAgent === 'codex' && msg && msg.totalUsage) {
       const usage = msg.totalUsage;
       if ((usage.inputTokens || 0) > 0 || (usage.outputTokens || 0) > 0) {
@@ -1921,11 +2036,13 @@
 
       case 'usage':
         if (msg.totalUsage) {
+          currentTotalUsage = deepClone(msg.totalUsage);
           const cacheText = msg.totalUsage.cachedInputTokens ? ` · cache ${msg.totalUsage.cachedInputTokens}` : '';
           costDisplay.textContent = `in ${msg.totalUsage.inputTokens} · out ${msg.totalUsage.outputTokens}${cacheText}`;
           if (currentSessionId) {
             updateCachedSession(currentSessionId, (snapshot) => { snapshot.totalUsage = deepClone(msg.totalUsage); });
           }
+          renderComposerStatusline();
         }
         break;
 
@@ -1960,6 +2077,19 @@
           if (currentSessionId) {
             updateCachedSession(currentSessionId, (snapshot) => { snapshot.model = msg.model; });
           }
+          renderComposerStatusline();
+        }
+        break;
+
+      case 'workspace_status':
+        if (msg.sessionId === currentSessionId) {
+          currentWorkspaceStatus = msg.workspaceStatus ? deepClone(msg.workspaceStatus) : null;
+          renderComposerStatusline();
+        }
+        if (msg.sessionId) {
+          updateCachedSession(msg.sessionId, (snapshot) => {
+            snapshot.workspaceStatus = msg.workspaceStatus ? deepClone(msg.workspaceStatus) : null;
+          });
         }
         break;
 

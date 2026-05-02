@@ -81,6 +81,27 @@ assert(
   'composer should keep the upload button fixed while centering the text input beside it'
 );
 assert(
+  /id="composer-statusline"/.test(fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8')) &&
+    /\.composer-statusline\s*\{/.test(styleCss) &&
+    /function\s+renderComposerStatusline\(\)/.test(appJs) &&
+    /currentModel/.test(appJs) &&
+    /currentCwd/.test(appJs) &&
+    /workspaceStatus/.test(appJs),
+  'composer should expose a dedicated status line under the input with model cwd context and git data'
+);
+assert(
+  /workspaceStatus:\s*payload\.workspaceStatus\s*\?\s*deepClone\(payload\.workspaceStatus\)\s*:\s*null/.test(appJs) &&
+    /workspaceStatus:\s*buildWorkspaceStatus\(session\)/.test(serverJs) &&
+    /type:\s*'workspace_status'/.test(serverJs),
+  'session payloads and runtime updates should carry workspace status metadata'
+);
+assert(
+  /function\s+resolveContextWindowTokens/.test(appJs) &&
+    /function\s+formatContextUsageText/.test(appJs) &&
+    /function\s+formatWorkspaceGitText/.test(appJs),
+  'composer status line should format model context and git status explicitly'
+);
+assert(
   /function\s+broadcastBackgroundDone\(sessionId,\s*entry,\s*excludeWs\s*=\s*null\)/.test(serverJs) &&
     /broadcastBackgroundDone\(sessionId,\s*entry,\s*entry\.ws\)/.test(serverJs),
   'process completion should notify other connected clients even when one websocket receives the final stream'

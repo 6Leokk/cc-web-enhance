@@ -131,6 +131,40 @@
   border-color: var(--info);
   box-shadow: 0 0 0 3px rgba(91, 126, 161, 0.12);
 }
+.composer-statusline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 800px;
+  margin: 8px auto 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.composer-status-segment {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-status-segment.is-model {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+.composer-status-segment.is-context,
+.composer-status-segment.is-git {
+  flex-shrink: 0;
+}
+.composer-status-segment.is-cwd {
+  flex: 1;
+}
+.composer-status-separator {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
 .attach-btn {
   appearance: none;
   width: 40px;
@@ -287,6 +321,10 @@
   }
   .theme-grid {
     grid-template-columns: 1fr;
+  }
+  .composer-statusline {
+    gap: 6px;
+    font-size: 10px;
   }
   .chat-agent-menu {
     right: 10px;

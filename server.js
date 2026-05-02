@@ -1416,6 +1416,92 @@ function sessionModelLabel(session) {
   return isClaudeSession(session) ? (modelShortName(session.model) || session.model) : session.model;
 }
 
+function parseGitNumstat(text) {
+  const totals = { addedLines: 0, deletedLines: 0 };
+  for (const line of String(text || '').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split('\t');
+    if (parts.length < 3) continue;
+    const added = Number(parts[0]);
+    const deleted = Number(parts[1]);
+    if (Number.isFinite(added)) totals.addedLines += added;
+    if (Number.isFinite(deleted)) totals.deletedLines += deleted;
+  }
+  return totals;
+}
+
+function runGitCommand(cwd, args) {
+  if (!cwd) return null;
+  try {
+    return spawnSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      timeout: 1500,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function buildWorkspaceStatus(session) {
+  const cwd = session?.cwd || null;
+  const taskMode = session?.taskMode || 'local';
+  const workspaceStatus = {
+    cwd,
+    git: {
+      available: false,
+      branch: '',
+      addedLines: 0,
+      deletedLines: 0,
+      detached: false,
+      taskMode,
+    },
+  };
+  if (!cwd || taskMode === 'remote') return workspaceStatus;
+
+  const probe = runGitCommand(cwd, ['rev-parse', '--is-inside-work-tree']);
+  if (!probe || probe.status !== 0 || String(probe.stdout || '').trim() !== 'true') {
+    return workspaceStatus;
+  }
+
+  let branch = '';
+  let detached = false;
+  const branchResult = runGitCommand(cwd, ['branch', '--show-current']);
+  if (branchResult && branchResult.status === 0) {
+    branch = String(branchResult.stdout || '').trim();
+  }
+  if (!branch) {
+    const headResult = runGitCommand(cwd, ['rev-parse', '--short', 'HEAD']);
+    branch = headResult && headResult.status === 0 ? String(headResult.stdout || '').trim() : '';
+    detached = !!branch;
+  }
+
+  const diffResult = runGitCommand(cwd, ['diff', '--numstat', 'HEAD', '--']);
+  const diffTotals = diffResult && diffResult.status === 0
+    ? parseGitNumstat(diffResult.stdout)
+    : { addedLines: 0, deletedLines: 0 };
+
+  workspaceStatus.git = {
+    available: true,
+    branch: branch || 'HEAD',
+    addedLines: diffTotals.addedLines,
+    deletedLines: diffTotals.deletedLines,
+    detached,
+    taskMode,
+  };
+  return workspaceStatus;
+}
+
+function sendWorkspaceStatus(ws, sessionId, session) {
+  if (!ws || ws.readyState !== 1 || !sessionId || !session) return;
+  wsSend(ws, {
+    type: 'workspace_status',
+    sessionId,
+    workspaceStatus: buildWorkspaceStatus(session),
+  }, true);
+}
+
 function splitHistoryMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
   if (list.length <= INITIAL_HISTORY_COUNT) {
@@ -1803,6 +1889,7 @@ function handleProcessComplete(sessionId, exitCode, signal) {
       sessionId,
       messages: finalAssistantMessages,
     });
+      if (session) sendWorkspaceStatus(entry.ws, sessionId, session);
 	    wsSend(entry.ws, { type: 'done', sessionId, costUsd: entry.lastCost || null });
 	    sendSessionList(entry.ws);
 	    broadcastBackgroundDone(sessionId, entry, entry.ws);
@@ -2622,6 +2709,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
           cwd: session.cwd || null,
           totalCost: session.totalCost || 0,
           totalUsage: session.totalUsage || null,
+          workspaceStatus: buildWorkspaceStatus(session),
           taskMode: session.taskMode || 'local',
           sshHostId: session.sshHostId || '',
           remoteCwd: session.remoteCwd || '',
@@ -2888,6 +2976,7 @@ function handleNewSession(ws, msg) {
     cwd: session.cwd,
     totalCost: 0,
     totalUsage: session.totalUsage,
+    workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
     historyPending: false,
@@ -2941,6 +3030,7 @@ function handleLoadSession(ws, sessionId, requestId = '') {
   }
   const { recentMessages, olderChunks } = splitHistoryMessages(session.messages);
   const effectiveCwd = session.cwd || activeProcesses.get(sessionId)?.cwd || null;
+  if (effectiveCwd && !session.cwd) session.cwd = effectiveCwd;
 
   // Detach ws from any previous session's process
   for (const [, entry] of activeProcesses) {
@@ -2966,10 +3056,11 @@ function handleLoadSession(ws, sessionId, requestId = '') {
     model: sessionModelLabel(session),
     agent: getSessionAgent(session),
     hasUnread: hadUnread,
-    cwd: effectiveCwd,
-    totalCost: session.totalCost || 0,
-    totalUsage: session.totalUsage || null,
-    historyTotal: session.messages.length,
+	    cwd: effectiveCwd,
+	    totalCost: session.totalCost || 0,
+	    totalUsage: session.totalUsage || null,
+      workspaceStatus: buildWorkspaceStatus(session),
+	    historyTotal: session.messages.length,
     historyBuffered: recentMessages.length,
     historyPending: olderChunks.length > 0,
     updated: session.updated,
@@ -3274,6 +3365,7 @@ function handleMessage(ws, msg, options = {}) {
       cwd: session.cwd || null,
       totalCost: session.totalCost || 0,
       totalUsage: session.totalUsage || null,
+      workspaceStatus: buildWorkspaceStatus(session),
       updated: session.updated,
       hasUnread: false,
       historyPending: false,
@@ -3768,6 +3860,7 @@ function handleImportNativeSession(ws, msg) {
     cwd: session.cwd,
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
+    workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
     historyPending: false,
@@ -3870,6 +3963,7 @@ function handleImportCodexSession(ws, msg) {
     cwd: session.cwd,
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
+    workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
     historyPending: false,
