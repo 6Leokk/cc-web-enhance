@@ -4,7 +4,18 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "regression": "node scripts/regression.js"
+    "regression": "node scripts/regression.js",
+    "regression:assistant-mode": "node scripts/assistant-message-mode-regression.js",
+    "regression:codex-format": "node scripts/codex-message-format-regression.js",
+    "regression:notify": "node scripts/notify-regression.js",
+    "regression:notify-foreground": "node scripts/notify-foreground-regression.js",
+    "regression:codex-stream-refresh": "node scripts/codex-stream-refresh-regression.js",
+    "regression:harness": "node scripts/regression-harness-regression.js",
+    "regression:sidebar-swipe": "node scripts/sidebar-swipe-regression.js",
+    "regression:markdown-security": "node scripts/markdown-security-regression.js",
+    "regression:theme": "node scripts/theme-regression.js",
+    "regression:mobile-scroll": "node scripts/mobile-scroll-regression.js",
+    "regression:ui": "node scripts/ui-regression.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

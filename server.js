@@ -2,10 +2,17 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { createAgentRuntime } = require('./lib/agent-runtime');
 const { createCodexRolloutStore } = require('./lib/codex-rollouts');
+const {
+  DEFAULT_ASSISTANT_MESSAGE_MODE,
+  buildAssistantCompletionMessages,
+  normalizeAssistantMessageMode,
+} = require('./lib/assistant-message-mode');
+const { shouldTreatCompletionAsError } = require('./lib/completion-error');
 
 // Load .env
 const envPath = path.join(__dirname, '.env');
@@ -17,6 +24,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const PORT = parseInt(process.env.PORT) || 8002;
+const HOST = process.env.HOST || '127.0.0.1';
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
 const CODEX_PATH = process.env.CODEX_PATH || 'codex';
 const CONFIG_DIR = process.env.CC_WEB_CONFIG_DIR || path.join(__dirname, 'config');
@@ -32,6 +40,7 @@ const NOTIFY_CONFIG_PATH = path.join(CONFIG_DIR, 'notify.json');
 const AUTH_CONFIG_PATH = path.join(CONFIG_DIR, 'auth.json');
 const MODEL_CONFIG_PATH = path.join(CONFIG_DIR, 'model.json');
 const CODEX_CONFIG_PATH = path.join(CONFIG_DIR, 'codex.json');
+const UI_CONFIG_PATH = path.join(CONFIG_DIR, 'ui.json');
 const BANNED_IPS_PATH = path.join(CONFIG_DIR, 'banned_ips.json');
 
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -75,24 +84,40 @@ const DEFAULT_SUMMARY_CONFIG = {
   model: '',
 };
 
+const DEFAULT_BARK_CONFIG = {
+  serverUrl: 'https://api.day.app',
+  deviceKey: '',
+  group: 'CC-Web',
+  sound: '',
+  level: 'active',
+  icon: '',
+  url: '',
+};
+
+const BARK_LEVELS = new Set(['active', 'timeSensitive', 'passive']);
+
 function loadNotifyConfig() {
   try {
     if (fs.existsSync(NOTIFY_CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(NOTIFY_CONFIG_PATH, 'utf8'));
       // Ensure summary field exists for older configs
       if (!raw.summary) raw.summary = { ...DEFAULT_SUMMARY_CONFIG };
+      if (!raw.bark) raw.bark = { ...DEFAULT_BARK_CONFIG };
+      raw.bark = { ...DEFAULT_BARK_CONFIG, ...raw.bark };
       return raw;
     }
   } catch {}
   // First run: migrate from .env PUSHPLUS_TOKEN
   const token = process.env.PUSHPLUS_TOKEN || '';
+  const bark = loadBarkConfigFromEnv();
   const config = {
-    provider: token ? 'pushplus' : 'off',
+    provider: bark.deviceKey ? 'bark' : (token ? 'pushplus' : 'off'),
     pushplus: { token },
     telegram: { botToken: '', chatId: '' },
     serverchan: { sendKey: '' },
     feishu: { webhook: '' },
     qqbot: { qmsgKey: '' },
+    bark,
     summary: { ...DEFAULT_SUMMARY_CONFIG },
   };
   saveNotifyConfig(config);
@@ -118,6 +143,15 @@ function getNotifyConfigMasked() {
     serverchan: { sendKey: maskToken(config.serverchan?.sendKey) },
     feishu: { webhook: maskToken(config.feishu?.webhook) },
     qqbot: { qmsgKey: maskToken(config.qqbot?.qmsgKey) },
+    bark: {
+      serverUrl: config.bark?.serverUrl || DEFAULT_BARK_CONFIG.serverUrl,
+      deviceKey: maskToken(config.bark?.deviceKey),
+      group: config.bark?.group || DEFAULT_BARK_CONFIG.group,
+      sound: config.bark?.sound || '',
+      level: config.bark?.level || DEFAULT_BARK_CONFIG.level,
+      icon: config.bark?.icon || '',
+      url: config.bark?.url || '',
+    },
     summary: {
       enabled: !!s.enabled,
       trigger: s.trigger || 'background',
@@ -138,12 +172,29 @@ const NOTIFY_CONTENT_LIMITS = {
   serverchan: 30000,
   pushplus: 18000,
   feishu: 18000,
+  bark: 4000,
 };
 
 function truncateForChannel(text, provider) {
   const limit = NOTIFY_CONTENT_LIMITS[provider] || 18000;
   if (text.length <= limit) return text;
   return text.slice(0, limit - 20) + '\n\n[内容已截断]';
+}
+
+function normalizeBarkLevel(level) {
+  return BARK_LEVELS.has(level) ? level : DEFAULT_BARK_CONFIG.level;
+}
+
+function loadBarkConfigFromEnv() {
+  return {
+    serverUrl: process.env.BARK_SERVER_URL || DEFAULT_BARK_CONFIG.serverUrl,
+    deviceKey: process.env.BARK_DEVICE_KEY || '',
+    group: process.env.BARK_GROUP || DEFAULT_BARK_CONFIG.group,
+    sound: process.env.BARK_SOUND || '',
+    level: normalizeBarkLevel(process.env.BARK_LEVEL || DEFAULT_BARK_CONFIG.level),
+    icon: process.env.BARK_ICON || '',
+    url: process.env.BARK_URL || '',
+  };
 }
 
 function getSummaryApiCredentials(summaryConfig) {
@@ -341,17 +392,35 @@ function sendNotification(title, content) {
         isFormData = true;
         break;
       }
+      case 'bark': {
+        const bark = { ...DEFAULT_BARK_CONFIG, ...(config.bark || {}) };
+        if (!bark.deviceKey) return resolve({ ok: false, error: 'Bark Device Key 未配置' });
+        const serverUrl = (bark.serverUrl || DEFAULT_BARK_CONFIG.serverUrl).replace(/\/+$/, '');
+        url = `${serverUrl}/${encodeURIComponent(bark.deviceKey)}`;
+        const payload = {
+          title,
+          body: truncated,
+          group: bark.group || DEFAULT_BARK_CONFIG.group,
+          level: normalizeBarkLevel(bark.level),
+        };
+        for (const key of ['sound', 'icon', 'url']) {
+          if (bark[key]) payload[key] = bark[key];
+        }
+        data = JSON.stringify(payload);
+        break;
+      }
       default:
         return resolve({ ok: false, error: `未知通知方式: ${config.provider}` });
     }
 
     const parsed = new URL(url);
     const contentType = isFormData ? 'application/x-www-form-urlencoded' : 'application/json';
+    const mod = parsed.protocol === 'http:' ? require('http') : require('https');
     const reqOptions = {
       method: 'POST',
       headers: { 'Content-Type': contentType, 'Content-Length': Buffer.byteLength(data) },
     };
-    const req = https.request(parsed, reqOptions, (res) => {
+    const req = mod.request(parsed, reqOptions, (res) => {
       let body = '';
       res.on('data', (c) => body += c);
       res.on('end', () => {
@@ -580,6 +649,39 @@ const DEFAULT_CODEX_CONFIG = {
   supportsSearch: false,
   localSnapshot: {},  // saved snapshot of local ~/.codex config (archive-only, no restore)
 };
+
+const DEFAULT_UI_CONFIG = {
+  assistantMessageMode: DEFAULT_ASSISTANT_MESSAGE_MODE,
+};
+
+function normalizeUiConfig(config) {
+  const raw = config && typeof config === 'object' ? config : {};
+  return {
+    assistantMessageMode: normalizeAssistantMessageMode(raw.assistantMessageMode),
+  };
+}
+
+function loadUiConfig() {
+  try {
+    if (fs.existsSync(UI_CONFIG_PATH)) {
+      return normalizeUiConfig(JSON.parse(fs.readFileSync(UI_CONFIG_PATH, 'utf8')));
+    }
+  } catch {}
+  return { ...DEFAULT_UI_CONFIG };
+}
+
+function saveUiConfig(config) {
+  fs.writeFileSync(UI_CONFIG_PATH, JSON.stringify(normalizeUiConfig(config), null, 2));
+}
+
+function handleSaveUiConfig(ws, newConfig) {
+  const current = loadUiConfig();
+  const merged = normalizeUiConfig({ ...current, ...(newConfig || {}) });
+  saveUiConfig(merged);
+  plog('INFO', 'ui_config_saved', { assistantMessageMode: merged.assistantMessageMode });
+  wsSend(ws, { type: 'ui_config', config: merged });
+  wsSend(ws, { type: 'system_message', message: '界面配置已保存' });
+}
 
 function splitCodexModelSpec(model) {
   const raw = String(model || '').trim();
@@ -1364,6 +1466,28 @@ function sendSessionList(ws) {
   }
 }
 
+function broadcastBackgroundDone(sessionId, entry, excludeWs = null) {
+  const sess = loadSession(sessionId);
+  const title = sess?.title || 'Untitled';
+  for (const client of wss.clients) {
+    if (client === excludeWs || client.readyState !== 1) continue;
+    wsSend(client, {
+      type: 'background_done',
+      sessionId,
+      title,
+      costUsd: entry.lastCost || null,
+      responseLen: (entry.fullText || '').length,
+    });
+  }
+}
+
+function notifyBackgroundCompletion(sessionId, entry, completionError, contextLimitExceeded) {
+  const sess = loadSession(sessionId);
+  buildNotifyContent(entry, sess, completionError, contextLimitExceeded).then(({ title: ntitle, content }) => {
+    sendNotification(ntitle, content);
+  });
+}
+
 // === File Tailer ===
 // Tails a file and calls onLine for each new complete line.
 class FileTailer {
@@ -1558,12 +1682,12 @@ function handleProcessComplete(sessionId, exitCode, signal) {
     }
   } catch {}
 
-  const rawCompletionError = entry.lastError || (
-    ((typeof exitCode === 'number' && exitCode !== 0) || (!!signal && signal !== 'SIGTERM'))
-      ? (stderrSnippet || null)
-      : null
-  );
-  contextLimitExceeded = isContextLimitError(entry.agent || 'claude', `${entry.fullText || ''}\n${stderrSnippet || ''}\n${rawCompletionError || ''}`);
+  contextLimitExceeded = isContextLimitError(entry.agent || 'claude', `${entry.fullText || ''}\n${stderrSnippet || ''}\n${entry.lastError || ''}`);
+  const shouldTreatAsError = shouldTreatCompletionAsError(exitCode, signal, stderrSnippet, {
+    hasResponseText: !!entry.fullText,
+    contextLimitExceeded,
+  });
+  const rawCompletionError = entry.lastError || (shouldTreatAsError ? (stderrSnippet || null) : null);
   const completionError = rawCompletionError ? formatRuntimeError(entry.agent || 'claude', rawCompletionError, { exitCode, signal }) : null;
   if (!entry.lastError && rawCompletionError) entry.lastError = rawCompletionError;
 
@@ -1596,16 +1720,14 @@ function handleProcessComplete(sessionId, exitCode, signal) {
 
   // Save result to session
   const session = loadSession(sessionId);
+  let finalAssistantMessages = [];
   if (session && entry.fullText) {
-    const msg = {
-      role: 'assistant',
-      content: entry.fullText,
-      toolCalls: entry.toolCalls || [],
-      timestamp: new Date().toISOString(),
-    };
-    if (entry.fullTextTruncated) msg.truncated = true;
-    if (entry.toolCallsTruncated) msg.toolCallsTruncated = true;
-    session.messages.push(msg);
+    finalAssistantMessages = buildAssistantCompletionMessages(
+      entry,
+      loadUiConfig().assistantMessageMode,
+      completeTime
+    );
+    session.messages.push(...finalAssistantMessages);
     session.updated = new Date().toISOString();
     if (!entry.ws) session.hasUnread = true;
     saveSession(session);
@@ -1656,10 +1778,16 @@ function handleProcessComplete(sessionId, exitCode, signal) {
       wsSend(entry.ws, { type: 'error', message: completionError });
     }
 
-    wsSend(entry.ws, { type: 'done', sessionId, costUsd: entry.lastCost || null });
-    sendSessionList(entry.ws);
-    // Push notification when trigger='always' (user online but still wants notification)
-    (() => {
+    wsSend(entry.ws, {
+      type: 'assistant_messages_final',
+      sessionId,
+      messages: finalAssistantMessages,
+    });
+	    wsSend(entry.ws, { type: 'done', sessionId, costUsd: entry.lastCost || null });
+	    sendSessionList(entry.ws);
+	    broadcastBackgroundDone(sessionId, entry, entry.ws);
+	    // Push notification when trigger='always' (user online but still wants notification)
+	    (() => {
       const notifyCfg = loadNotifyConfig();
       if (!notifyCfg.provider || notifyCfg.provider === 'off') return;
       if ((notifyCfg.summary?.trigger || 'background') !== 'always') return;
@@ -1668,26 +1796,12 @@ function handleProcessComplete(sessionId, exitCode, signal) {
         sendNotification(ntitle, content);
       });
     })();
-  } else {
-    // Process completed while browser was disconnected — notify all connected clients
-    const sess = loadSession(sessionId);
-    const title = sess?.title || 'Untitled';
-    for (const client of wss.clients) {
-      if (client.readyState === 1) {
-        wsSend(client, {
-          type: 'background_done',
-          sessionId,
-          title,
-          costUsd: entry.lastCost || null,
-          responseLen: (entry.fullText || '').length,
-        });
-      }
-    }
-    // Push notification (background task)
-    buildNotifyContent(entry, sess, completionError, contextLimitExceeded).then(({ title: ntitle, content }) => {
-      sendNotification(ntitle, content);
-    });
-  }
+	  } else {
+	    // Process completed while browser was disconnected — notify all connected clients
+	    broadcastBackgroundDone(sessionId, entry);
+	    // Push notification (background task)
+	    notifyBackgroundCompletion(sessionId, entry, completionError, contextLimitExceeded);
+	  }
 
   if (!shouldReturnForFollowup && !shouldAutoCompact && !contextLimitExceeded && pendingRetry && pendingRetry.text === (entry.fullText || '').trim()) {
     pendingCompactRetries.delete(sessionId);
@@ -1752,7 +1866,7 @@ function recoverProcesses() {
       if (isProcessRunning(pid)) {
         console.log(`[recovery] Re-attaching to session ${sessionId} (PID ${pid})`);
         plog('INFO', 'recovery_alive', { sessionId: sessionId.slice(0, 8), pid, agent });
-        const entry = { pid, ws: null, agent, fullText: '', toolCalls: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
+        const entry = { pid, ws: null, agent, fullText: '', toolCalls: [], assistantSegments: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
         activeProcesses.set(sessionId, entry);
 
         if (fs.existsSync(outputPath)) {
@@ -1769,7 +1883,7 @@ function recoverProcesses() {
         console.log(`[recovery] Processing completed output for session ${sessionId}`);
         plog('INFO', 'recovery_dead', { sessionId: sessionId.slice(0, 8), pid, agent });
         if (fs.existsSync(outputPath)) {
-          const tempEntry = { pid: 0, ws: null, agent, fullText: '', toolCalls: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
+          const tempEntry = { pid: 0, ws: null, agent, fullText: '', toolCalls: [], assistantSegments: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
           const content = fs.readFileSync(outputPath, 'utf8');
           for (const line of content.split('\n')) {
             if (!line.trim()) continue;
@@ -1779,12 +1893,11 @@ function recoverProcesses() {
             } catch {}
           }
           if (session && tempEntry.fullText) {
-            session.messages.push({
-              role: 'assistant',
-              content: tempEntry.fullText,
-              toolCalls: tempEntry.toolCalls || [],
-              timestamp: new Date().toISOString(),
-            });
+            session.messages.push(...buildAssistantCompletionMessages(
+              tempEntry,
+              loadUiConfig().assistantMessageMode,
+              new Date().toISOString()
+            ));
             session.updated = new Date().toISOString();
             saveSession(session);
           }
@@ -1954,6 +2067,7 @@ wss.on('connection', (ws, req) => {
         activeTokens.set(authToken, Date.now());
         authenticated = true;
         wsSend(ws, { type: 'auth_result', success: true, token: authToken, mustChangePassword: !!authConfig.mustChange });
+        wsSend(ws, { type: 'ui_config', config: loadUiConfig() });
         sendSessionList(ws);
       } else {
         const justBanned = recordAuthFailure(clientIP);
@@ -1982,7 +2096,7 @@ wss.on('connection', (ws, req) => {
         handleNewSession(ws, msg);
         break;
       case 'load_session':
-        handleLoadSession(ws, msg.sessionId);
+        handleLoadSession(ws, msg.sessionId, msg.requestId);
         break;
       case 'delete_session':
         handleDeleteSession(ws, msg.sessionId);
@@ -2004,6 +2118,12 @@ wss.on('connection', (ws, req) => {
         break;
       case 'save_notify_config':
         handleSaveNotifyConfig(ws, msg.config);
+        break;
+      case 'get_ui_config':
+        wsSend(ws, { type: 'ui_config', config: loadUiConfig() });
+        break;
+      case 'save_ui_config':
+        handleSaveUiConfig(ws, msg.config);
         break;
       case 'test_notify':
         handleTestNotify(ws);
@@ -2095,6 +2215,18 @@ function handleSaveNotifyConfig(ws, newConfig) {
   merged.feishu = { webhook: (newConfig.feishu?.webhook && !newConfig.feishu.webhook.includes('****')) ? newConfig.feishu.webhook : current.feishu?.webhook || '' };
   // qqbot
   merged.qqbot = { qmsgKey: (newConfig.qqbot?.qmsgKey && !newConfig.qqbot.qmsgKey.includes('****')) ? newConfig.qqbot.qmsgKey : current.qqbot?.qmsgKey || '' };
+  // bark
+  const nb = newConfig.bark || {};
+  const cb = current.bark || {};
+  merged.bark = {
+    serverUrl: nb.serverUrl !== undefined ? (nb.serverUrl || DEFAULT_BARK_CONFIG.serverUrl) : (cb.serverUrl || DEFAULT_BARK_CONFIG.serverUrl),
+    deviceKey: (nb.deviceKey && !nb.deviceKey.includes('****')) ? nb.deviceKey : cb.deviceKey || '',
+    group: nb.group !== undefined ? (nb.group || DEFAULT_BARK_CONFIG.group) : (cb.group || DEFAULT_BARK_CONFIG.group),
+    sound: nb.sound !== undefined ? nb.sound : (cb.sound || ''),
+    level: normalizeBarkLevel(nb.level || cb.level),
+    icon: nb.icon !== undefined ? nb.icon : (cb.icon || ''),
+    url: nb.url !== undefined ? nb.url : (cb.url || ''),
+  };
   // summary
   const ns = newConfig.summary || {};
   const cs = current.summary || {};
@@ -2776,7 +2908,7 @@ function handleNewSession(ws, msg) {
   }
 }
 
-function handleLoadSession(ws, sessionId) {
+function handleLoadSession(ws, sessionId, requestId = '') {
   const session = loadSession(sessionId);
   if (!session) {
     return wsSend(ws, { type: 'error', message: 'Session not found' });
@@ -2806,9 +2938,10 @@ function handleLoadSession(ws, sessionId) {
     saveSession(session);
   }
 
-  wsSend(ws, {
-    type: 'session_info',
-    sessionId: session.id,
+	  wsSend(ws, {
+	    type: 'session_info',
+	    requestId,
+	    sessionId: session.id,
     messages: recentMessages,
     title: session.title,
     mode: session.permissionMode || 'yolo',
@@ -2830,9 +2963,10 @@ function handleLoadSession(ws, sessionId) {
 
   if (olderChunks.length > 0) {
     olderChunks.forEach((chunk, index) => {
-      wsSend(ws, {
-        type: 'session_history_chunk',
-        sessionId: session.id,
+	      wsSend(ws, {
+	        type: 'session_history_chunk',
+	        requestId,
+	        sessionId: session.id,
         messages: chunk,
         remaining: Math.max(0, olderChunks.length - index - 1),
       });
@@ -2854,6 +2988,7 @@ function handleLoadSession(ws, sessionId) {
       sessionId,
       text: entry.fullText || '',
       toolCalls: entry.toolCalls || [],
+      assistantSegments: entry.assistantSegments || [],
     });
   }
 }
@@ -3254,6 +3389,7 @@ function handleMessage(ws, msg, options = {}) {
     errorSent: false,
     codexHomeDir: spawnSpec.codexHomeDir || '',
     codexRuntimeKey: spawnSpec.codexRuntimeKey || '',
+    assistantSegments: [],
     tailer: null,
   };
   activeProcesses.set(currentSessionId, entry);
@@ -3818,19 +3954,33 @@ function killPortOccupant(port) {
 
 function handleServerListenError(err) {
   if (err && err.code === 'EADDRINUSE') {
-    plog('WARN', 'server_port_in_use_retry', { port: PORT, host: '127.0.0.1' });
+    plog('WARN', 'server_port_in_use_retry', { port: PORT, host: HOST });
     if (killPortOccupant(PORT)) {
-      try { server.listen(PORT, '127.0.0.1'); } catch {}
+      try { server.listen(PORT, HOST); } catch {}
       return;
     }
     plog('ERROR', 'server_port_in_use', { port: PORT, error: err.message });
-    console.error(`CC-Web server failed: 127.0.0.1:${PORT} is already in use.`);
+    console.error(`CC-Web server failed: ${HOST}:${PORT} is already in use.`);
     process.exit(98);
     return;
   }
   plog('ERROR', 'server_error', { error: err?.message || String(err) });
   console.error(err);
   process.exit(1);
+}
+
+function getLanAccessUrls(port) {
+  const urls = [];
+  try {
+    const nets = os.networkInterfaces();
+    for (const entries of Object.values(nets)) {
+      for (const netInfo of entries || []) {
+        if (netInfo.family !== 'IPv4' || netInfo.internal || !netInfo.address) continue;
+        urls.push(`http://${netInfo.address}:${port}`);
+      }
+    }
+  } catch {}
+  return [...new Set(urls)];
 }
 
 server.on('error', handleServerListenError);
@@ -3847,7 +3997,12 @@ process.on('unhandledRejection', (reason) => {
   plog('ERROR', 'unhandled_rejection', { error: reason?.stack || reason?.message || String(reason) });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   ensureAuthLoaded();
-  console.log(`CC-Web server listening on 127.0.0.1:${PORT}`);
+  console.log(`CC-Web server listening on ${HOST}:${PORT}`);
+  if (HOST === '0.0.0.0' || HOST === '::') {
+    for (const url of getLanAccessUrls(PORT)) {
+      console.log(`LAN access: ${url}`);
+    }
+  }
 });

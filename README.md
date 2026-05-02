@@ -27,7 +27,7 @@ https://github.com/ZgDaniel/cc-web 给我装！
 - **超轻量** — 后端性能占用少，前端通过 web 访问
 - **多会话管理** — 创建、切换、重命名、删除会话，删除时同步清除本地 Claude 历史记录
 - **本地历史导入** — Claude 可导入 `~/.claude/projects/` 会话；Codex 可导入 `~/.codex/sessions/` rollout 历史
-- **后台任务** — 关闭浏览器后 Claude 进程继续运行，完成后推送通知，支持 PushPlus / Telegram / Server酱 / 飞书机器人 / QQ（Qmsg）
+- **后台任务** — 关闭浏览器后 Claude 进程继续运行，完成后推送通知，支持 PushPlus / Telegram / Server酱 / 飞书机器人 / QQ（Qmsg）/ Bark
 - **多 API 切换** — 可配置多个 API 方案，一键切换，即时生效
 - **开发者配置** — 可保存主机SSH信息、github token，实现快速管理远程主机、管理github仓库
 
@@ -74,12 +74,22 @@ copy .env.example .env  & REM 可选
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | 否 | 自动生成 | Web 登录密码（首次启动自动迁移到 `config/auth.json`） |
 | `PORT` | 否 | `8002` | 服务监听端口 |
+| `HOST` | 否 | `127.0.0.1` | 服务监听地址；局域网访问可设为 `0.0.0.0` |
 | `CLAUDE_PATH` | 否 | `claude` | Claude CLI 可执行文件路径 |
 | `CODEX_PATH` | 否 | `codex` | Codex CLI 可执行文件路径 |
 | `CC_WEB_CONFIG_DIR` | 否 | `./config` | 配置目录覆写（主要供隔离测试使用） |
 | `CC_WEB_SESSIONS_DIR` | 否 | `./sessions` | 会话目录覆写（主要供隔离测试使用） |
 | `CC_WEB_LOGS_DIR` | 否 | `./logs` | 日志目录覆写（主要供隔离测试使用） |
 | `PUSHPLUS_TOKEN` | 否 | - | PushPlus Token（首次启动自动迁移到通知配置） |
+| `BARK_DEVICE_KEY` | 否 | - | Bark Device Key（首次启动自动迁移到通知配置） |
+| `BARK_SERVER_URL` | 否 | `https://api.day.app` | Bark 服务地址，支持自建服务 |
+| `BARK_GROUP` | 否 | `CC-Web` | Bark 通知分组 |
+| `BARK_LEVEL` | 否 | `active` | Bark 通知级别：`active` / `timeSensitive` / `passive` |
+| `BARK_SOUND` | 否 | - | Bark 铃声名称 |
+| `BARK_ICON` | 否 | - | Bark 通知图标 URL |
+| `BARK_URL` | 否 | - | Bark 通知点击跳转 URL |
+
+`.env` 已在 `.gitignore` 中，不会上传到 GitHub；不要把真实 Token 写进 `.env.example` 或 README。
 
 ### 通知配置
 
@@ -92,6 +102,7 @@ copy .env.example .env  & REM 可选
 | **Server酱** | SendKey | [sct.ftqq.com](https://sct.ftqq.com/) 注册获取 |
 | **飞书机器人** | Webhook URL | 飞书群 → 设置 → 群机器人 → 添加自定义机器人 |
 | **QQ（Qmsg）** | Qmsg Key | [qmsg.zendee.cn](https://qmsg.zendee.cn/) 登录后获取，需添加接收 QQ 号 |
+| **Bark**（iOS） | Server URL + Device Key | iPhone 安装 Bark 后复制 Key；默认服务为 `https://api.day.app`，也支持自建服务 |
 
 配置保存在 `config/notify.json`，Token 在 UI 中脱敏显示（仅显示前4后4位）。
 
@@ -248,7 +259,7 @@ node server.js
 
 **局域网访问**（手机和电脑在同一 WiFi）：
 - 出于安全考虑，CC-Web 默认只监听 `127.0.0.1`，推荐通过 Nginx 等反向代理、Tailscale 或 Cloudflare Tunnel 暴露访问入口，并配合防火墙限制来源。
-- 确需在局域网内使用，可将服务监听地址从 `127.0.0.1` 改为 `0.0.0.0`（例如增加 `HOST=0.0.0.0` 配置并让启动代码读取该变量），再通过 `http://电脑局域网IP:8002` 访问。
+- 确需在局域网内使用，可在 `.env` 设置 `HOST=0.0.0.0`，再通过 `http://电脑局域网IP:8002` 访问。
 
 **远程访问**（外出时用手机控制家里电脑）：
 - 推荐使用 [Tailscale](https://tailscale.com/) — 电脑和手机各安装一个，自动组网，免费够用

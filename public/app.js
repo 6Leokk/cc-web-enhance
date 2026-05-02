@@ -33,6 +33,11 @@
   const SESSION_CACHE_MAX_WEIGHT = 1_500_000;
   const SIDEBAR_SWIPE_TRIGGER = 72;
   const SIDEBAR_SWIPE_MAX_VERTICAL_DRIFT = 42;
+  const SIDEBAR_SWIPE_STORAGE_KEY = 'cc-web-sidebar-swipe-enabled';
+  const ASSISTANT_MESSAGE_MODE_OPTIONS = [
+    { value: 'segmented', label: '分段显示（默认）', desc: '系统默认。每段 assistant 回复单独成条，工具调用跟在对应段落下面。' },
+    { value: 'single', label: '合并为一条', desc: '每轮 assistant 回复只显示一条消息，工具调用集中挂在这条消息下面。' },
+  ];
 
   const MODEL_OPTIONS = [
     { value: 'opus', label: 'Opus', desc: '最强大，1M 上下文' },
@@ -47,6 +52,12 @@
   ];
 
   const THEME_OPTIONS = [
+    {
+      value: 'system',
+      label: '跟随系统',
+      desc: '系统深色时自动切到黑白暗夜，浅色时回到暖纸主题。',
+      swatches: ['#f7f3ec', '#161616', '#f5f5f5', '#777777'],
+    },
     {
       value: 'washi',
       label: 'Washi Warm',
@@ -65,7 +76,14 @@
       desc: '更明亮的留白和更克制的棕色强调，像编辑台一样安静。',
       swatches: ['#f6f1e8', '#efe8dc', '#8b5e3c', '#2f4b45'],
     },
+    {
+      value: 'mono-night',
+      label: '黑白暗夜',
+      desc: '纯黑、灰阶和白字的低亮度模式，适合夜间长时间阅读。',
+      swatches: ['#050505', '#151515', '#f3f3f3', '#737373'],
+    },
   ];
+  const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
   // --- State ---
   let ws = null;
@@ -85,11 +103,15 @@
   let currentMode = 'yolo';
   let currentModel = 'opus';
   let currentAgent = AGENT_LABELS[localStorage.getItem('cc-web-agent')] ? localStorage.getItem('cc-web-agent') : DEFAULT_AGENT;
-  let currentTheme = (document.documentElement.dataset.theme || localStorage.getItem('cc-web-theme') || 'washi');
+  let currentTheme = normalizeTheme(localStorage.getItem('cc-web-theme') || 'system');
   let codexConfigCache = null;
   let loadedHistorySessionId = null;
   let activeSessionLoad = null;
   let sidebarSwipe = null;
+  let streamingSegmentEls = [];
+  let sidebarSwipeEnabled = localStorage.getItem(SIDEBAR_SWIPE_STORAGE_KEY) === '1';
+  let assistantMessageMode = 'segmented';
+  let pendingFinalAssistantMessages = null;
   let pendingAttachments = [];
   let uploadingAttachments = [];
   let loginPasswordValue = ''; // store login password for force-change flow
@@ -97,6 +119,12 @@
   let currentSessionRunning = false;
   let skipDeleteConfirm = localStorage.getItem('cc-web-skip-delete-confirm') === '1';
   let pendingInitialSessionLoad = false;
+  let hasCompletedInitialSessionLoad = false;
+  let viewportAnchorTimers = [];
+  let foregroundAnchorUntil = 0;
+  let isUserAtMessagesBottom = true;
+  let messagesWereNearBottomBeforeHidden = true;
+  let sessionLoadRequestSeq = 0;
 
   // --- DOM ---
   const $ = (sel) => document.querySelector(sel);
@@ -139,9 +167,62 @@
   function setVH() {
     document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
   }
+
+  function isNearMessagesBottom() {
+    if (!messagesDiv) return false;
+    const distance = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight;
+    return distance < 96;
+  }
+
+  function updateUserBottomState() {
+    isUserAtMessagesBottom = isNearMessagesBottom();
+    if (!isUserAtMessagesBottom && Date.now() > foregroundAnchorUntil) clearViewportAnchorTimers();
+  }
+
+  function handleViewportResize() {
+    const shouldKeepBottom = isUserAtMessagesBottom || isNearMessagesBottom() || document.activeElement === msgInput;
+    setVH();
+    if (!shouldKeepBottom) return;
+    forceMessagesBottomAfterForeground();
+  }
+
+  function forceMessagesBottomAfterForeground() {
+    clearViewportAnchorTimers();
+    foregroundAnchorUntil = Date.now() + 1200;
+    const anchor = () => {
+      requestAnimationFrame(() => {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        isUserAtMessagesBottom = true;
+        updateScrollbar();
+      });
+    };
+    anchor();
+    for (const delay of [0, 80, 240, 600, 1000]) {
+      viewportAnchorTimers.push(setTimeout(anchor, delay));
+    }
+  }
+
+  function clearViewportAnchorTimers() {
+    viewportAnchorTimers.forEach((timer) => clearTimeout(timer));
+    viewportAnchorTimers = [];
+  }
+
+  function cancelForegroundBottomAnchor() {
+    foregroundAnchorUntil = 0;
+    clearViewportAnchorTimers();
+  }
+
+  function forceMessagesBottomAfterSessionSwitch() {
+    forceMessagesBottomAfterForeground();
+  }
+
   setVH();
-  window.addEventListener('resize', setVH);
-  window.addEventListener('orientationchange', () => setTimeout(setVH, 100));
+  window.addEventListener('resize', handleViewportResize);
+  window.addEventListener('orientationchange', () => setTimeout(handleViewportResize, 100));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', handleViewportResize);
+    window.visualViewport.addEventListener('scroll', handleViewportResize);
+  }
 
   function buildWelcomeMarkup(agent) {
     const label = AGENT_LABELS[agent] || AGENT_LABELS.claude;
@@ -156,8 +237,35 @@
     return THEME_OPTIONS.some((item) => item.value === theme) ? theme : 'washi';
   }
 
+  function normalizeAssistantMessageMode(mode) {
+    return ASSISTANT_MESSAGE_MODE_OPTIONS.some((item) => item.value === mode) ? mode : 'segmented';
+  }
+
+  function getAssistantMessageModeOption(mode) {
+    return ASSISTANT_MESSAGE_MODE_OPTIONS.find((item) => item.value === normalizeAssistantMessageMode(mode)) || ASSISTANT_MESSAGE_MODE_OPTIONS[0];
+  }
+
+  function updateAssistantMessageModeControls() {
+    document.querySelectorAll('[data-assistant-message-mode]').forEach((button) => {
+      const active = button.dataset.assistantMessageMode === assistantMessageMode;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-assistant-message-mode-summary]').forEach((node) => {
+      node.textContent = getAssistantMessageModeOption(assistantMessageMode).label;
+    });
+  }
+
   function getThemeOption(theme) {
     return THEME_OPTIONS.find((item) => item.value === normalizeTheme(theme)) || THEME_OPTIONS[0];
+  }
+
+  function resolveThemeValue(theme) {
+    const normalized = normalizeTheme(theme);
+    if (normalized === 'system') {
+      return systemThemeQuery?.matches ? 'mono-night' : 'washi';
+    }
+    return normalized;
   }
 
   function refreshThemeSummaries() {
@@ -169,7 +277,7 @@
 
   function applyTheme(theme) {
     currentTheme = normalizeTheme(theme);
-    document.documentElement.dataset.theme = currentTheme;
+    document.documentElement.dataset.theme = resolveThemeValue(currentTheme);
     localStorage.setItem('cc-web-theme', currentTheme);
     refreshThemeSummaries();
   }
@@ -203,6 +311,11 @@
     });
   }
 
+  function syncSystemTheme() {
+    if (currentTheme !== 'system') return;
+    document.documentElement.dataset.theme = resolveThemeValue(currentTheme);
+  }
+
   function buildThemeEntryHtml() {
     return `
       <div class="settings-section-title">外观</div>
@@ -210,10 +323,74 @@
         <span class="settings-nav-card-main">
           <span class="settings-nav-card-title">界面主题</span>
           <span class="settings-nav-card-meta">当前：<span data-theme-summary>${escapeHtml(getThemeOption(currentTheme).label)}</span></span>
+          <span class="settings-nav-card-meta">Assistant：<span data-assistant-message-mode-summary>${escapeHtml(getAssistantMessageModeOption(assistantMessageMode).label)}</span></span>
         </span>
         <span class="settings-nav-card-arrow" aria-hidden="true">›</span>
       </button>
     `;
+  }
+
+  function buildAppearancePrefsHtml() {
+    return `
+      <div class="settings-field settings-toggle-row">
+        <label for="sidebar-swipe-toggle">侧栏滑动手势</label>
+        <input type="checkbox" id="sidebar-swipe-toggle" ${sidebarSwipeEnabled ? 'checked' : ''}>
+      </div>
+      <div class="settings-inline-note">开启后移动端可右滑打开、左滑关闭会话栏；关闭后只能用左上角按钮打开，点遮罩关闭。</div>
+      <div class="settings-field">
+        <div class="settings-label-row">
+          <label>Assistant 消息显示</label>
+          <button class="settings-help-btn" type="button" id="assistant-message-mode-help" aria-label="说明">?</button>
+        </div>
+        <div class="settings-segmented" id="assistant-message-mode-select" role="radiogroup" aria-label="Assistant 消息显示">
+          ${ASSISTANT_MESSAGE_MODE_OPTIONS.map((option) => `
+            <button
+              class="settings-segmented-btn${option.value === assistantMessageMode ? ' active' : ''}"
+              type="button"
+              role="radio"
+              aria-checked="${option.value === assistantMessageMode ? 'true' : 'false'}"
+              data-assistant-message-mode="${option.value}"
+              title="${escapeHtml(option.desc)}"
+            >${escapeHtml(option.label)}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div class="settings-inline-note">此设置只影响之后新生成的回复，不重排已经保存的历史消息。</div>
+    `;
+  }
+
+  function bindAppearancePrefs(panel) {
+    const toggle = panel.querySelector('#sidebar-swipe-toggle');
+    if (toggle) {
+      toggle.addEventListener('change', () => {
+        sidebarSwipeEnabled = toggle.checked;
+        if (sidebarSwipeEnabled) {
+          localStorage.setItem(SIDEBAR_SWIPE_STORAGE_KEY, '1');
+        } else {
+          localStorage.removeItem(SIDEBAR_SWIPE_STORAGE_KEY);
+          sidebarSwipe = null;
+        }
+      });
+    }
+    const assistantModeControl = panel.querySelector('#assistant-message-mode-select');
+    if (assistantModeControl) {
+      assistantModeControl.querySelectorAll('[data-assistant-message-mode]').forEach((button) => {
+        button.addEventListener('click', () => {
+          assistantMessageMode = normalizeAssistantMessageMode(button.dataset.assistantMessageMode);
+          updateAssistantMessageModeControls();
+          send({ type: 'save_ui_config', config: { assistantMessageMode } });
+        });
+      });
+    }
+    const helpBtn = panel.querySelector('#assistant-message-mode-help');
+    if (helpBtn) {
+      helpBtn.addEventListener('click', () => {
+        showInfoModal(
+          'Assistant 消息显示',
+          '系统默认是分段显示。\n\n分段显示：每段 assistant 回复各成一条消息，工具调用跟着对应段落走，适合排查执行过程。\n\n合并为一条：每轮回复只保留一条 assistant 消息，工具调用集中放在这条消息下面，适合更紧凑地阅读。\n\n这个设置只影响之后新生成的回复，不会改动已经保存的历史。'
+        );
+      });
+    }
   }
 
   function buildNotifyEntryHtml(config) {
@@ -254,6 +431,13 @@
         <label>通知方式</label>
         <select class="settings-select" id="notify-provider">
           ${PROVIDER_OPTIONS.map(o => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="settings-field">
+        <label>任务完成通知</label>
+        <select class="settings-select" id="notify-trigger">
+          <option value="background">仅后台任务通知</option>
+          <option value="always">网页前台也通知</option>
         </select>
       </div>
       <div id="notify-fields"></div>
@@ -306,6 +490,8 @@
     _onNotifyConfig = (config) => {
       currentNotifyConfig = config;
       providerSelect.value = config.provider || 'off';
+      const triggerSelect = panel.querySelector('#notify-trigger');
+      if (triggerSelect) triggerSelect.value = config.summary?.trigger || 'background';
       renderFields(config.provider || 'off');
       if (savedOnNotifyConfig) savedOnNotifyConfig(config);
     };
@@ -1116,6 +1302,8 @@
     currentModel = currentAgent === 'claude' ? 'opus' : '';
     isGenerating = false;
     pendingText = '';
+    pendingFinalAssistantMessages = null;
+    streamingSegmentEls = [];
     pendingAttachments = [];
     uploadingAttachments = [];
     activeToolCalls.clear();
@@ -1137,6 +1325,8 @@
       sendBtn.hidden = false;
       abortBtn.hidden = true;
       pendingText = '';
+      pendingFinalAssistantMessages = null;
+      streamingSegmentEls = [];
       activeToolCalls.clear();
     }
     currentSessionId = snapshot.sessionId;
@@ -1191,6 +1381,16 @@
     }
   }
 
+  function refreshCurrentSessionAfterMetadataChange(previousMeta, nextMeta) {
+    if (!currentSessionId || !nextMeta || normalizeAgent(nextMeta.agent) !== currentAgent) return;
+    const completedNow = !!previousMeta?.isRunning && !nextMeta?.isRunning;
+    const becameUnread = !!nextMeta.hasUnread;
+    const cached = sessionCache.get(currentSessionId);
+    const cacheIsStale = !!(cached?.snapshot?.complete && cached.version !== (nextMeta.updated || null));
+    if (!completedNow && !becameUnread && !cacheIsStale) return;
+    openSession(currentSessionId, { forceSync: true, blocking: false, label: '正在更新当前会话…' });
+  }
+
   function getSessionLoadLabel(sessionId) {
     const meta = sessionId ? getSessionMeta(sessionId) : null;
     const title = meta?.title ? `“${meta.title}”` : '所选会话';
@@ -1200,7 +1400,8 @@
   function setSessionLoading(sessionId, options = {}) {
     const loading = !!sessionId;
     const blocking = options.blocking !== false;
-    activeSessionLoad = loading ? { sessionId, blocking, snapshot: null } : null;
+    const requestId = options.requestId || '';
+    activeSessionLoad = loading ? { sessionId, blocking, requestId, snapshot: null } : null;
     const showOverlay = !!(loading && blocking);
     document.body.classList.toggle('session-loading-active', showOverlay);
     sessionLoadingOverlay.hidden = !showOverlay;
@@ -1226,9 +1427,29 @@
       (!sessionId || activeSessionLoad.sessionId === sessionId));
   }
 
+  function shouldApplySessionInfo(msg) {
+    if (activeSessionLoad) {
+      if (activeSessionLoad.sessionId !== msg?.sessionId) return false;
+      if (msg?.requestId) return activeSessionLoad.requestId === msg.requestId;
+      return true;
+    }
+    if (msg?.requestId) return false;
+    return !currentSessionId || currentSessionId === msg?.sessionId;
+  }
+
+  function shouldApplySessionHistoryChunk(msg) {
+    if (activeSessionLoad) {
+      if (activeSessionLoad.sessionId !== msg?.sessionId) return false;
+      if (msg?.requestId) return activeSessionLoad.requestId === msg.requestId;
+      return true;
+    }
+    if (msg?.requestId) return false;
+    return msg?.sessionId === currentSessionId && loadedHistorySessionId === msg.sessionId;
+  }
+
   function finishSessionSwitch(sessionId) {
     if (isBlockingSessionLoad(sessionId)) {
-      scrollToBottom();
+      forceMessagesBottomAfterSessionSwitch();
       requestAnimationFrame(() => clearSessionLoading(sessionId));
       return;
     }
@@ -1251,8 +1472,9 @@
     if (!force && sessionId === currentSessionId && !activeSessionLoad) return;
     renderEpoch++;
     loadedHistorySessionId = null;
-    setSessionLoading(sessionId, { blocking, label: options.label });
-    send({ type: 'load_session', sessionId });
+    const requestId = `${Date.now()}-${++sessionLoadRequestSeq}`;
+    setSessionLoading(sessionId, { blocking, label: options.label, requestId });
+    send({ type: 'load_session', sessionId, requestId });
   }
 
   function showCachedSession(sessionId) {
@@ -1411,7 +1633,26 @@
       ${previewPane}<pre><code class="hljs language-${escapeHtml(lang)}">${highlighted}</code></pre>
     </div>`;
   };
+  renderer.html = function (token) {
+    const rawHtml = typeof token === 'string'
+      ? token
+      : String(token?.text || token?.raw || '');
+    return escapeHtml(rawHtml);
+  };
   marked.setOptions({ renderer, breaks: true, gfm: true });
+
+  function sanitizeRenderedMarkdown(html) {
+    if (!html) return '';
+    if (!window.DOMPurify || typeof window.DOMPurify.sanitize !== 'function') {
+      // Safe fallback if the CDN sanitizer fails to load.
+      return escapeHtml(html);
+    }
+    return window.DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'meta', 'link'],
+      FORBID_ATTR: ['srcdoc'],
+    });
+  }
 
   window.ccCopyCode = function (btn) {
     const wrapper = btn.closest('.code-block-wrapper');
@@ -1489,11 +1730,12 @@
           loginOverlay.hidden = true;
           app.hidden = false;
           send({ type: 'get_codex_config' });
+          send({ type: 'get_ui_config' });
           // Check if must change password
           if (msg.mustChangePassword) {
             showForceChangePassword();
           } else {
-            pendingInitialSessionLoad = true;
+            pendingInitialSessionLoad = !hasCompletedInitialSessionLoad;
           }
         } else {
           authToken = null;
@@ -1514,6 +1756,7 @@
         break;
 
       case 'session_list':
+        const previousCurrentMeta = currentSessionId ? getSessionMeta(currentSessionId) : null;
         sessions = msg.sessions || [];
         reconcileSessionCacheWithSessions();
         renderSessionList();
@@ -1522,13 +1765,16 @@
         }
         if (pendingInitialSessionLoad) {
           pendingInitialSessionLoad = false;
+          hasCompletedInitialSessionLoad = true;
           syncViewForAgent(currentAgent, { preserveCurrent: false, loadLast: true });
         } else if (currentSessionId && !getSessionMeta(currentSessionId)) {
           resetChatView(currentAgent);
         }
+        refreshCurrentSessionAfterMetadataChange(previousCurrentMeta, currentSessionId ? getSessionMeta(currentSessionId) : null);
         break;
 
       case 'session_info':
+        if (!shouldApplySessionInfo(msg)) break;
         const snapshot = normalizeSessionSnapshot(msg);
         if (activeSessionLoad?.sessionId === msg.sessionId) {
           activeSessionLoad.snapshot = snapshot;
@@ -1549,7 +1795,7 @@
         break;
 
       case 'session_history_chunk':
-        if (msg.sessionId === currentSessionId && loadedHistorySessionId === msg.sessionId) {
+        if (shouldApplySessionHistoryChunk(msg)) {
           const blocking = isBlockingSessionLoad(msg.sessionId);
           if (activeSessionLoad?.sessionId === msg.sessionId && activeSessionLoad.snapshot) {
             activeSessionLoad.snapshot.messages = cloneMessages(msg.messages || []).concat(activeSessionLoad.snapshot.messages);
@@ -1577,6 +1823,17 @@
         if (!isGenerating) startGenerating();
         pendingText += msg.text;
         scheduleRender();
+        break;
+
+      case 'assistant_segment_start':
+        if (!isGenerating) {
+          startGenerating();
+        } else if (assistantMessageMode === 'segmented') {
+          finalizeStreamingSegment();
+          startStreamingSegment();
+        } else if (msg.prefix) {
+          pendingText += msg.prefix;
+        }
         break;
 
       case 'tool_start':
@@ -1612,6 +1869,12 @@
         }
         break;
 
+      case 'assistant_messages_final':
+        if (msg.sessionId === currentSessionId) {
+          pendingFinalAssistantMessages = cloneMessages(msg.messages || []);
+        }
+        break;
+
       case 'done':
         finishGenerating(msg.sessionId);
         break;
@@ -1643,35 +1906,11 @@
       case 'resume_generating':
         // Server has an active process for this session — resume streaming
         setCurrentSessionRunningState(true);
-        if (!isGenerating || !document.getElementById('streaming-msg')) {
-          startGenerating();
-        } else {
-          sendBtn.hidden = true;
-          abortBtn.hidden = false;
-          toolGroupCount = 0;
-          hasGrouped = false;
-          activeToolCalls.clear();
-          const toolsDiv = document.querySelector('#streaming-msg .msg-tools');
-          if (toolsDiv) toolsDiv.innerHTML = '';
-        }
-        pendingText = msg.text || '';
-        flushRender();
-        if (msg.toolCalls && msg.toolCalls.length > 0) {
-          for (const tc of msg.toolCalls) {
-            activeToolCalls.set(tc.id, {
-              name: tc.name,
-              input: tc.input,
-              result: tc.result,
-              kind: tc.kind || null,
-              meta: tc.meta || null,
-              done: tc.done,
-            });
-            appendToolCall(tc.id, tc.name, tc.input, tc.done, tc.kind || null, tc.meta || null);
-            if (tc.done && tc.result) {
-              updateToolCall(tc.id, tc.result);
-            }
-          }
-        }
+        isGenerating = true;
+        sendBtn.hidden = true;
+        abortBtn.hidden = false;
+        pendingFinalAssistantMessages = null;
+        renderResumedAssistantSegments(msg);
         break;
 
       case 'error':
@@ -1697,6 +1936,13 @@
 
       case 'notify_test_result':
         if (typeof _onNotifyTestResult === 'function') _onNotifyTestResult(msg);
+        break;
+
+      case 'ui_config':
+        if (msg.config) {
+          assistantMessageMode = normalizeAssistantMessageMode(msg.config.assistantMessageMode);
+          updateAssistantMessageModeControls();
+        }
         break;
 
       case 'model_config':
@@ -1763,9 +2009,11 @@
     isGenerating = true;
     setCurrentSessionRunningState(true);
     pendingText = '';
+    pendingFinalAssistantMessages = null;
     activeToolCalls.clear();
     toolGroupCount = 0;
     hasGrouped = false;
+    streamingSegmentEls = [];
     sendBtn.hidden = true;
     abortBtn.hidden = false;
     // 不禁用输入框，允许用户继续输入（但无法发送）
@@ -1773,6 +2021,12 @@
     const welcome = messagesDiv.querySelector('.welcome-msg');
     if (welcome) welcome.remove();
 
+    startStreamingSegment();
+  }
+
+  function startStreamingSegment() {
+    const oldStreaming = document.getElementById('streaming-msg');
+    if (oldStreaming) oldStreaming.removeAttribute('id');
     const msgEl = createMsgElement('assistant', '');
     msgEl.id = 'streaming-msg';
     // 流式消息 bubble 拆为 .msg-text 和 .msg-tools 两个子容器
@@ -1786,7 +2040,89 @@
     bubble.appendChild(textDiv);
     bubble.appendChild(toolsDiv);
     messagesDiv.appendChild(msgEl);
+    streamingSegmentEls.push(msgEl);
+    pendingText = '';
+    toolGroupCount = 0;
+    hasGrouped = false;
     scrollToBottom();
+  }
+
+  function renderToolCallsIntoStream(toolsDiv, toolCalls) {
+    if (!toolsDiv || !Array.isArray(toolCalls)) return;
+    const FOLD_AT = 3;
+    let grouped = false;
+    for (const tc of toolCalls) {
+      if (!tc || !tc.id) continue;
+      const tool = {
+        ...tc,
+        done: !!tc.done,
+        kind: tc.kind || null,
+        meta: tc.meta || null,
+      };
+      activeToolCalls.set(tc.id, tool);
+      const details = createToolCallElement(tc.id, tool, tool.done);
+      const looseBefore = Array.from(toolsDiv.children).filter((child) => child.classList.contains('tool-call'));
+      const shouldFold = looseBefore.length + 1 >= FOLD_AT || !!toolsDiv.querySelector(':scope > .tool-group');
+      toolsDiv.appendChild(details);
+      if (shouldFold) grouped = foldLooseTools(toolsDiv) || grouped;
+    }
+    if (grouped) foldLooseTools(toolsDiv);
+  }
+
+  function normalizeResumedAssistantSegments(msg) {
+    if (assistantMessageMode === 'single') {
+      return [{
+        content: msg.text || '',
+        toolCalls: Array.isArray(msg.toolCalls) ? msg.toolCalls : [],
+      }];
+    }
+    const rawSegments = Array.isArray(msg.assistantSegments) ? msg.assistantSegments : [];
+    const segments = rawSegments
+      .map((segment) => ({
+        content: String(segment?.content || ''),
+        toolCalls: Array.isArray(segment?.toolCalls) ? segment.toolCalls : [],
+      }))
+      .filter((segment) => segment.content.trim() || segment.toolCalls.length > 0);
+    if (segments.length > 0) return segments;
+    return [{
+      content: msg.text || '',
+      toolCalls: Array.isArray(msg.toolCalls) ? msg.toolCalls : [],
+    }];
+  }
+
+  function renderResumedAssistantSegments(msg) {
+    const segments = normalizeResumedAssistantSegments(msg);
+    streamingSegmentEls.forEach((el) => {
+      if (el && el.parentNode) el.remove();
+    });
+    streamingSegmentEls = [];
+    activeToolCalls.clear();
+    toolGroupCount = 0;
+    hasGrouped = false;
+
+    segments.forEach((segment, index) => {
+      startStreamingSegment();
+      pendingText = segment.content || '';
+      flushRender();
+      const streamEl = document.getElementById('streaming-msg');
+      const toolsDiv = streamEl?.querySelector('.msg-tools');
+      renderToolCallsIntoStream(toolsDiv, segment.toolCalls);
+      if (index < segments.length - 1) finalizeStreamingSegment();
+    });
+    if (segments.length === 0) {
+      startStreamingSegment();
+    }
+  }
+
+  function finalizeStreamingSegment() {
+    if (pendingText) flushRender();
+    const streamEl = document.getElementById('streaming-msg');
+    if (!streamEl) return null;
+    const typing = streamEl.querySelector('.typing-indicator');
+    if (typing) typing.remove();
+    foldLooseTools(streamEl);
+    streamEl.removeAttribute('id');
+    return streamEl;
   }
 
   function finishGenerating(sessionId) {
@@ -1796,42 +2132,36 @@
     setCurrentSessionRunningState(false);
     msgInput.focus();
 
-    if (pendingText) flushRender();
+    const streamEl = finalizeStreamingSegment();
 
-    const typing = document.querySelector('.typing-indicator');
-    if (typing) typing.remove();
-
-    const streamEl = document.getElementById('streaming-msg');
-    if (streamEl) {
-      // 若本轮出现过父目录，把末尾散落的 .tool-call 也一并收入同一父节点
-      if (hasGrouped) {
-        const toolsDiv = streamEl.querySelector('.msg-tools');
-        if (toolsDiv) {
-          const loose = Array.from(toolsDiv.children).filter(c => c.classList.contains('tool-call'));
-          if (loose.length > 0) {
-            let group = toolsDiv.querySelector(':scope > .tool-group');
-            if (!group) {
-              group = document.createElement('details');
-              group.className = 'tool-group';
-              const gs = document.createElement('summary');
-              gs.className = 'tool-group-summary';
-              group.appendChild(gs);
-              const inner = document.createElement('div');
-              inner.className = 'tool-group-inner';
-              group.appendChild(inner);
-              toolsDiv.insertBefore(group, toolsDiv.firstChild);
-            }
-            const inner = group.querySelector('.tool-group-inner');
-            loose.forEach(c => inner.appendChild(c));
-            _refreshGroupSummary(group);
-          }
+    if (pendingFinalAssistantMessages) {
+      const targets = streamingSegmentEls.filter((el) => el && el.parentNode);
+      const frag = document.createDocumentFragment();
+      pendingFinalAssistantMessages.forEach((message) => frag.appendChild(buildMsgElement(message)));
+      if (targets.length > 0) {
+        if (pendingFinalAssistantMessages.length > 0) {
+          targets[0].replaceWith(frag);
+          targets.slice(1).forEach((el) => el.remove());
+        } else {
+          targets.forEach((el) => el.remove());
         }
+      } else if (streamEl && streamEl.parentNode) {
+        streamEl.replaceWith(frag);
+      } else if (pendingFinalAssistantMessages.length > 0) {
+        messagesDiv.appendChild(frag);
       }
-      streamEl.removeAttribute('id');
+      updateCachedSession(sessionId || currentSessionId, (snapshot) => {
+        snapshot.messages = (snapshot.messages || []).concat(cloneMessages(pendingFinalAssistantMessages));
+        snapshot.complete = false;
+      });
+      pendingFinalAssistantMessages = null;
+      scrollToBottom();
     }
 
     if (sessionId) currentSessionId = sessionId;
     pendingText = '';
+    pendingFinalAssistantMessages = null;
+    streamingSegmentEls = [];
     activeToolCalls.clear();
     toolGroupCount = 0;
     hasGrouped = false;
@@ -1859,7 +2189,7 @@
 
   function renderMarkdown(text) {
     if (!text) return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-    try { return marked.parse(text); }
+    try { return sanitizeRenderedMarkdown(marked.parse(text)); }
     catch { return escapeHtml(text); }
   }
 
@@ -2010,37 +2340,13 @@
 
 	        // 散落的 .tool-call 达到 FOLD_AT 个时，移入唯一 .tool-group
         const loose = Array.from(bubble.children).filter(c => c.classList.contains('tool-call'));
-        if (loose.length >= FOLD_AT) {
-          let group = bubble.querySelector(':scope > .tool-group');
-          if (!group) {
-            group = document.createElement('details');
-            group.className = 'tool-group';
-            const gs = document.createElement('summary');
-            gs.className = 'tool-group-summary';
-            group.appendChild(gs);
-            const inner = document.createElement('div');
-            inner.className = 'tool-group-inner';
-            group.appendChild(inner);
-            bubble.insertBefore(group, bubble.firstChild);
-            grouped = true;
-          }
-          const inner = group.querySelector('.tool-group-inner');
-          loose.forEach(c => inner.appendChild(c));
-          _refreshGroupSummary(group);
-        }
+        const shouldFold = loose.length + 1 >= FOLD_AT || !!bubble.querySelector(':scope > .tool-group');
         bubble.appendChild(details);
+        if (shouldFold) grouped = foldLooseTools(bubble) || grouped;
       }
       // 结束时若出现过父目录，收尾散落项
       if (grouped) {
-        const loose = Array.from(bubble.children).filter(c => c.classList.contains('tool-call'));
-        if (loose.length > 0) {
-          const group = bubble.querySelector(':scope > .tool-group');
-          if (group) {
-            const inner = group.querySelector('.tool-group-inner');
-            loose.forEach(c => inner.appendChild(c));
-            _refreshGroupSummary(group);
-          }
-        }
+        foldLooseTools(bubble);
       }
     }
     return el;
@@ -2376,27 +2682,33 @@
     // 散落的 .tool-call 直接子节点达到3个时，将它们全部移入父节点；之后继续散落，再达3个再移入
     const FOLD_AT = 3;
     const looseBefore = Array.from(toolsDiv.children).filter(c => c.classList.contains('tool-call'));
-    if (looseBefore.length >= FOLD_AT) {
-      // 确保存在唯一的 .tool-group
-      let group = toolsDiv.querySelector(':scope > .tool-group');
-      if (!group) {
-        group = document.createElement('details');
-        group.className = 'tool-group';
-        const gs = document.createElement('summary');
-        gs.className = 'tool-group-summary';
-        group.appendChild(gs);
-        const inner = document.createElement('div');
-        inner.className = 'tool-group-inner';
-        group.appendChild(inner);
-        toolsDiv.insertBefore(group, toolsDiv.firstChild);
-        hasGrouped = true;
-      }
-      const inner = group.querySelector('.tool-group-inner');
-      looseBefore.forEach(c => inner.appendChild(c));
-      _refreshGroupSummary(group);
-    }
+    const shouldFold = looseBefore.length + 1 >= FOLD_AT || !!toolsDiv.querySelector(':scope > .tool-group');
     toolsDiv.appendChild(details);
+    if (shouldFold) hasGrouped = foldLooseTools(toolsDiv) || hasGrouped;
     scrollToBottom();
+  }
+
+  function foldLooseTools(container) {
+    const toolsDiv = container.querySelector?.('.msg-tools') || container;
+    if (!toolsDiv) return false;
+    const loose = Array.from(toolsDiv.children).filter(c => c.classList.contains('tool-call'));
+    let group = toolsDiv.querySelector(':scope > .tool-group');
+    if (!group && loose.length < 3) return false;
+    if (!group) {
+      group = document.createElement('details');
+      group.className = 'tool-group';
+      const gs = document.createElement('summary');
+      gs.className = 'tool-group-summary';
+      group.appendChild(gs);
+      const inner = document.createElement('div');
+      inner.className = 'tool-group-inner';
+      group.appendChild(inner);
+      toolsDiv.insertBefore(group, toolsDiv.firstChild);
+    }
+    const inner = group.querySelector('.tool-group-inner');
+    loose.forEach(c => inner.appendChild(c));
+    _refreshGroupSummary(group);
+    return true;
   }
 
   function _refreshGroupSummary(group) {
@@ -2463,6 +2775,34 @@
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   }
 
+  function showInfoModal(title, message) {
+    const overlay = document.createElement('div');
+    overlay.className = 'settings-overlay';
+    overlay.style.zIndex = '10002';
+
+    const box = document.createElement('div');
+    box.className = 'settings-panel';
+    box.innerHTML = `
+      <div class="settings-header">
+        <h3>${escapeHtml(title)}</h3>
+        <button class="settings-close" type="button" title="关闭">&times;</button>
+      </div>
+      <div class="settings-inline-note assistant-message-mode-help" data-help="assistant_message_mode_help">${escapeHtml(message).replace(/\n/g, '<br>')}</div>
+      <div class="settings-actions">
+        <button class="btn-save" type="button" id="info-modal-ok">知道了</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const close = () => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    box.querySelector('.settings-close').addEventListener('click', close);
+    box.querySelector('#info-modal-ok').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  }
+
   function appendSystemMessage(message) {
     const welcome = messagesDiv.querySelector('.welcome-msg');
     if (welcome) welcome.remove();
@@ -2481,6 +2821,7 @@
   function scrollToBottom() {
     requestAnimationFrame(() => {
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      isUserAtMessagesBottom = true;
       updateScrollbar();
     });
   }
@@ -2505,6 +2846,7 @@
   }
 
   messagesDiv.addEventListener('scroll', () => {
+    updateUserBottomState();
     updateScrollbar();
     // 移动端：滚动时短暂显示滑块，停止后淡出
     scrollbarEl.classList.add('scrolling');
@@ -2513,6 +2855,8 @@
       if (!isDragging) scrollbarEl.classList.remove('scrolling');
     }, 1200);
   }, { passive: true });
+  messagesDiv.addEventListener('touchstart', cancelForegroundBottomAnchor, { passive: true });
+  messagesDiv.addEventListener('wheel', cancelForegroundBottomAnchor, { passive: true });
   new ResizeObserver(updateScrollbar).observe(messagesDiv);
 
   // Drag logic
@@ -2717,6 +3061,13 @@
     sidebarOverlay.hidden = true;
   }
 
+  function canCloseSidebarBySwipe(target) {
+    if (!window.matchMedia('(max-width: 768px), (pointer: coarse)').matches) return false;
+    if (!sidebar.classList.contains('open')) return false;
+    if (!target) return false;
+    return sidebar.contains(target) || target === sidebarOverlay;
+  }
+
   function canOpenSidebarBySwipe(target) {
     if (!window.matchMedia('(max-width: 768px), (pointer: coarse)').matches) return false;
     if (sidebar.classList.contains('open')) return false;
@@ -2728,15 +3079,12 @@
     return true;
   }
 
-  function canCloseSidebarBySwipe(target) {
-    if (!window.matchMedia('(max-width: 768px), (pointer: coarse)').matches) return false;
-    if (!sidebar.classList.contains('open')) return false;
-    if (!target) return false;
-    return sidebar.contains(target) || target === sidebarOverlay;
-  }
-
   function handleSidebarSwipeStart(e) {
     if (!e.touches || e.touches.length !== 1) return;
+    if (!sidebarSwipeEnabled) {
+      sidebarSwipe = null;
+      return;
+    }
     const touch = e.touches[0];
     if (canCloseSidebarBySwipe(e.target)) {
       sidebarSwipe = {
@@ -3149,6 +3497,8 @@
     }
   });
 
+  msgInput.addEventListener('focus', handleViewportResize);
+
   msgInput.addEventListener('keydown', (e) => {
     // Command menu navigation
     if (!cmdMenu.hidden) {
@@ -3255,6 +3605,7 @@
     { value: 'serverchan', label: 'Server酱' },
     { value: 'feishu', label: '飞书机器人' },
     { value: 'qqbot', label: 'QQ（Qmsg）' },
+    { value: 'bark', label: 'Bark' },
   ];
 
   function buildNotifyFieldsHtml(config, provider) {
@@ -3302,6 +3653,44 @@
         </div>
       `;
     }
+    if (provider === 'bark') {
+      const bark = config?.bark || {};
+      const level = bark.level || 'active';
+      return `
+        <div class="settings-field">
+          <label>Bark Server</label>
+          <input type="text" id="notify-bark-server" placeholder="https://api.day.app" value="${escapeHtml(bark.serverUrl || 'https://api.day.app')}">
+        </div>
+        <div class="settings-field">
+          <label>Device Key</label>
+          <input type="text" id="notify-bark-key" placeholder="Bark Device Key" value="${escapeHtml(bark.deviceKey || '')}">
+        </div>
+        <div class="settings-field">
+          <label>分组</label>
+          <input type="text" id="notify-bark-group" placeholder="CC-Web" value="${escapeHtml(bark.group || 'CC-Web')}">
+        </div>
+        <div class="settings-field">
+          <label>通知级别</label>
+          <select class="settings-select" id="notify-bark-level">
+            <option value="active" ${level === 'active' ? 'selected' : ''}>active</option>
+            <option value="timeSensitive" ${level === 'timeSensitive' ? 'selected' : ''}>timeSensitive</option>
+            <option value="passive" ${level === 'passive' ? 'selected' : ''}>passive</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label>铃声</label>
+          <input type="text" id="notify-bark-sound" placeholder="可选，例如 bell" value="${escapeHtml(bark.sound || '')}">
+        </div>
+        <div class="settings-field">
+          <label>图标 URL</label>
+          <input type="text" id="notify-bark-icon" placeholder="可选，https://..." value="${escapeHtml(bark.icon || '')}">
+        </div>
+        <div class="settings-field">
+          <label>点击跳转 URL</label>
+          <input type="text" id="notify-bark-url" placeholder="可选，https://..." value="${escapeHtml(bark.url || '')}">
+        </div>
+      `;
+    }
     return '';
   }
 
@@ -3327,9 +3716,16 @@
     const sc = panel.querySelector('#notify-sc-sendkey');
     const feishuWh = panel.querySelector('#notify-feishu-webhook');
     const qmsgKey = panel.querySelector('#notify-qmsg-key');
+    const barkServer = panel.querySelector('#notify-bark-server');
+    const barkKey = panel.querySelector('#notify-bark-key');
+    const barkGroup = panel.querySelector('#notify-bark-group');
+    const barkSound = panel.querySelector('#notify-bark-sound');
+    const barkLevel = panel.querySelector('#notify-bark-level');
+    const barkIcon = panel.querySelector('#notify-bark-icon');
+    const barkUrl = panel.querySelector('#notify-bark-url');
+    const notifyTrigger = panel.querySelector('#notify-trigger');
     // Summary config
     const summaryEnabled = panel.querySelector('#notify-summary-enabled');
-    const summaryTrigger = panel.querySelector('#notify-summary-trigger');
     const summarySource = panel.querySelector('#notify-summary-source');
     const summaryApiBase = panel.querySelector('#notify-summary-apibase');
     const summaryApiKey = panel.querySelector('#notify-summary-apikey');
@@ -3345,9 +3741,18 @@
       serverchan: { sendKey: sc ? sc.value.trim() : (currentConfig?.serverchan?.sendKey || '') },
       feishu: { webhook: feishuWh ? feishuWh.value.trim() : (currentConfig?.feishu?.webhook || '') },
       qqbot: { qmsgKey: qmsgKey ? qmsgKey.value.trim() : (currentConfig?.qqbot?.qmsgKey || '') },
+      bark: {
+        serverUrl: barkServer ? barkServer.value.trim() : (currentConfig?.bark?.serverUrl || 'https://api.day.app'),
+        deviceKey: barkKey ? barkKey.value.trim() : (currentConfig?.bark?.deviceKey || ''),
+        group: barkGroup ? barkGroup.value.trim() : (currentConfig?.bark?.group || 'CC-Web'),
+        sound: barkSound ? barkSound.value.trim() : (currentConfig?.bark?.sound || ''),
+        level: barkLevel ? barkLevel.value : (currentConfig?.bark?.level || 'active'),
+        icon: barkIcon ? barkIcon.value.trim() : (currentConfig?.bark?.icon || ''),
+        url: barkUrl ? barkUrl.value.trim() : (currentConfig?.bark?.url || ''),
+      },
       summary: {
         enabled: summaryEnabled ? summaryEnabled.checked : !!cs.enabled,
-        trigger: summaryTrigger ? summaryTrigger.value : (cs.trigger || 'background'),
+        trigger: notifyTrigger ? notifyTrigger.value : (cs.trigger || 'background'),
         apiSource: summarySource ? summarySource.value : (cs.apiSource || 'claude'),
         apiBase: summaryApiBase ? summaryApiBase.value.trim() : (cs.apiBase || ''),
         apiKey: summaryApiKey ? summaryApiKey.value.trim() : (cs.apiKey || ''),
@@ -3370,13 +3775,6 @@
         <input type="checkbox" id="notify-summary-enabled" ${enabled ? 'checked' : ''} style="width:auto;margin:0">
       </div>
       <div id="notify-summary-options" style="${enabled ? '' : 'display:none'}">
-        <div class="settings-field">
-          <label>推送时机</label>
-          <select class="settings-select" id="notify-summary-trigger">
-            <option value="background" ${trigger === 'background' ? 'selected' : ''}>仅后台任务</option>
-            <option value="always" ${trigger === 'always' ? 'selected' : ''}>所有任务</option>
-          </select>
-        </div>
         <div class="settings-field">
           <label>摘要 API 来源</label>
           <select class="settings-select" id="notify-summary-source">
@@ -3520,6 +3918,7 @@
     send({ type: 'get_model_config' });
     send({ type: 'get_codex_config' });
     send({ type: 'get_notify_config' });
+    send({ type: 'get_ui_config' });
 
     const overlay = document.createElement('div');
     overlay.className = 'settings-overlay';
@@ -3553,6 +3952,7 @@
       <div class="settings-divider"></div>
 
       ${buildThemeEntryHtml()}
+      ${buildAppearancePrefsHtml()}
 
       <div class="settings-divider"></div>
 
@@ -3583,6 +3983,7 @@
     document.body.appendChild(overlay);
     const themePageBtn = panel.querySelector('[data-open-theme-page]');
     if (themePageBtn) themePageBtn.addEventListener('click', openThemeSubpage);
+    bindAppearancePrefs(panel);
     const notifyPageBtn2 = panel.querySelector('[data-open-notify-page]');
     if (notifyPageBtn2) notifyPageBtn2.addEventListener('click', openNotifySubpage);
     const devPageBtn = panel.querySelector('[data-open-dev-page]');
@@ -4922,6 +5323,13 @@
 
   // --- Init ---
   applyTheme(currentTheme);
+  if (systemThemeQuery) {
+    if (systemThemeQuery.addEventListener) {
+      systemThemeQuery.addEventListener('change', syncSystemTheme);
+    } else if (systemThemeQuery.addListener) {
+      systemThemeQuery.addListener(syncSystemTheme);
+    }
+  }
   setCurrentAgent(currentAgent);
   renderSessionList();
   connect();
@@ -4941,6 +5349,10 @@
 
   // Visibility change: re-sync state when user returns to tab (critical for mobile)
   document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      messagesWereNearBottomBeforeHidden = isUserAtMessagesBottom || isNearMessagesBottom();
+      return;
+    }
     if (document.visibilityState !== 'visible') return;
     if (!ws || ws.readyState > 1) {
       // WS is dead, force reconnect
@@ -4950,8 +5362,23 @@
       if (isGenerating || currentSessionRunning) {
         send({ type: 'load_session', sessionId: currentSessionId });
       } else {
-        beginSessionSwitch(currentSessionId, { blocking: false, force: true });
+        send({ type: 'list_sessions' });
       }
+    }
+    if (messagesWereNearBottomBeforeHidden) {
+      forceMessagesBottomAfterForeground();
+    } else {
+      handleViewportResize();
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    messagesWereNearBottomBeforeHidden = isUserAtMessagesBottom || isNearMessagesBottom();
+  });
+
+  window.addEventListener('pageshow', () => {
+    if (messagesWereNearBottomBeforeHidden) {
+      forceMessagesBottomAfterForeground();
     }
   });
 

@@ -23,7 +23,7 @@ A lightweight browser interface for Claude Code and Codex, designed to keep each
 - **Local history import**: import Claude history from `~/.claude/projects/` and Codex rollout history from `~/.codex/sessions/`.
 - **Session resume**: context continuity via `--resume`; you can also reattach via SSH + `tmux attach -t claude` when needed.
 - **Background task support**: Claude processes continue after browser disconnect and notify you on completion.
-- **Multi-channel notifications**: PushPlus / Telegram / ServerChan / Feishu bot / QQ (Qmsg), configurable in Web UI.
+- **Multi-channel notifications**: PushPlus / Telegram / ServerChan / Feishu bot / QQ (Qmsg) / Bark, configurable in Web UI.
 - **Process persistence**: detached subprocess + PID files; running tasks survive service restarts.
 - **Multi-API switching**: configure multiple API profiles and switch between them instantly from the UI.
 - **Developer config**: save SSH host info (key/password auth) and GitHub tokens for quick remote host management and repository operations via `/ssh` and `/github` commands.
@@ -72,9 +72,19 @@ After startup, open `http://localhost:8002` and sign in with your password.
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | No | Auto-generated | Web login password (migrated into `config/auth.json` on first start) |
 | `PORT` | No | `8002` | Service port |
+| `HOST` | No | `127.0.0.1` | Bind address; use `0.0.0.0` for LAN access |
 | `CLAUDE_PATH` | No | `claude` | Executable path to Claude CLI |
 | `CODEX_PATH` | No | `codex` | Executable path to Codex CLI |
 | `PUSHPLUS_TOKEN` | No | - | PushPlus token (migrated into notification config on first start) |
+| `BARK_DEVICE_KEY` | No | - | Bark Device Key (migrated into notification config on first start) |
+| `BARK_SERVER_URL` | No | `https://api.day.app` | Bark server URL, including self-hosted servers |
+| `BARK_GROUP` | No | `CC-Web` | Bark notification group |
+| `BARK_LEVEL` | No | `active` | Bark notification level: `active` / `timeSensitive` / `passive` |
+| `BARK_SOUND` | No | - | Bark sound name |
+| `BARK_ICON` | No | - | Bark notification icon URL |
+| `BARK_URL` | No | - | Bark notification click URL |
+
+`.env` is already ignored by `.gitignore` and will not be uploaded to GitHub. Do not put real tokens in `.env.example` or README files.
 
 ### Notification Configuration
 
@@ -87,6 +97,7 @@ Open the **Settings (⚙)** button in the sidebar to configure notifications in 
 | **ServerChan** | SendKey | Register at [sct.ftqq.com](https://sct.ftqq.com/) |
 | **Feishu Bot** | Webhook URL | Feishu group → Settings → Group Bot |
 | **QQ (Qmsg)** | Qmsg Key | Obtain from [qmsg.zendee.cn](https://qmsg.zendee.cn/) |
+| **Bark** (iOS) | Server URL + Device Key | Copy the key from the Bark iOS app; defaults to `https://api.day.app` and also supports self-hosted servers |
 
 Settings are stored in `config/notify.json`. Tokens are masked in UI display.
 
@@ -242,7 +253,7 @@ node server.js
 
 **LAN access** (same Wi-Fi):
 - For security, CC-Web listens on `127.0.0.1` by default. Prefer exposing it through a reverse proxy such as Nginx, or through Tailscale / Cloudflare Tunnel, with firewall rules limiting who can connect.
-- If LAN access is required, change the bind address from `127.0.0.1` to `0.0.0.0` (for example, add `HOST=0.0.0.0` and make the startup code read it), then open `http://<your-lan-ip>:8002`.
+- If LAN access is required, set `HOST=0.0.0.0` in `.env`, then open `http://<your-lan-ip>:8002`.
 
 **Remote access**:
 - Recommended: [Tailscale](https://tailscale.com/) for secure private networking.

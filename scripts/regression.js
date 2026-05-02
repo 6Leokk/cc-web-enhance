@@ -64,7 +64,7 @@ async function waitForFile(filePath, timeoutMs = 10000) {
 }
 
 async function withServer(env, fn) {
-  const child = spawn('/usr/bin/node', [SERVER_PATH], {
+  const child = spawn(process.execPath, [SERVER_PATH], {
     cwd: REPO_DIR,
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -311,6 +311,15 @@ async function main() {
     serverchan: { sendKey: '' },
     feishu: { webhook: '' },
     qqbot: { qmsgKey: '' },
+    bark: {
+      serverUrl: 'https://api.day.app',
+      deviceKey: '',
+      group: 'CC-Web',
+      sound: '',
+      level: 'active',
+      icon: '',
+      url: '',
+    },
   }, null, 2));
 
   createFakeClaudeHistory(homeDir);
@@ -332,6 +341,41 @@ async function main() {
     const { ws, messages, token } = await connectWs(port, password);
 
     await nextMessage(messages, ws, (msg) => msg.type === 'session_list');
+
+    ws.send(JSON.stringify({
+      type: 'save_notify_config',
+      config: {
+        provider: 'bark',
+        bark: {
+          serverUrl: 'https://api.day.app',
+          deviceKey: 'bark-regression-key',
+          group: 'CC-Web Regression',
+          sound: 'bell',
+          level: 'timeSensitive',
+          icon: 'https://example.com/icon.png',
+          url: 'https://example.com/open',
+        },
+        summary: {
+          enabled: true,
+          trigger: 'always',
+          apiSource: 'custom',
+          apiBase: 'https://summary.example.com',
+          apiKey: 'sk-summary-regression',
+          model: 'summary-model',
+        },
+      },
+    }));
+    const notifyConfigMsg = await nextMessage(messages, ws, (msg) => msg.type === 'notify_config');
+    assert(notifyConfigMsg.config.provider === 'bark', 'Bark provider save/load failed');
+    assert(notifyConfigMsg.config.bark?.serverUrl === 'https://api.day.app', 'Bark server URL save/load failed');
+    assert(notifyConfigMsg.config.bark?.deviceKey.includes('****'), 'Bark device key should be masked');
+    assert(notifyConfigMsg.config.bark?.group === 'CC-Web Regression', 'Bark group save/load failed');
+    assert(notifyConfigMsg.config.bark?.sound === 'bell', 'Bark sound save/load failed');
+    assert(notifyConfigMsg.config.bark?.level === 'timeSensitive', 'Bark level save/load failed');
+    assert(notifyConfigMsg.config.bark?.icon === 'https://example.com/icon.png', 'Bark icon save/load failed');
+    assert(notifyConfigMsg.config.bark?.url === 'https://example.com/open', 'Bark URL save/load failed');
+    const storedNotifyConfig = JSON.parse(fs.readFileSync(path.join(configDir, 'notify.json'), 'utf8'));
+    assert(storedNotifyConfig.bark?.deviceKey === 'bark-regression-key', 'Bark device key should persist unmasked');
 
     ws.send(JSON.stringify({
       type: 'save_codex_config',
