@@ -1348,6 +1348,7 @@ function normalizeSession(session) {
   if (!Object.prototype.hasOwnProperty.call(session, 'totalUsage') || !session.totalUsage) {
     session.totalUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   }
+  if (!Object.prototype.hasOwnProperty.call(session, 'lastUsage')) session.lastUsage = null;
   if (!Object.prototype.hasOwnProperty.call(session, 'taskMode')) session.taskMode = 'local';
   if (!Object.prototype.hasOwnProperty.call(session, 'sshHostId')) session.sshHostId = '';
   if (!Object.prototype.hasOwnProperty.call(session, 'remoteCwd')) session.remoteCwd = '';
@@ -1444,11 +1445,26 @@ function runGitCommand(cwd, args) {
   }
 }
 
+function formatWorkspaceCwdDisplay(session, cwd) {
+  const raw = String(cwd || '').trim();
+  if (!raw) return '';
+  if (session?.taskMode === 'remote' && session?.remoteCwd) {
+    return String(session.remoteCwd).trim();
+  }
+  const homeDir = (process.env.HOME || process.env.USERPROFILE || '').trim().replace(/\/+$/, '');
+  if (homeDir && (raw === homeDir || raw.startsWith(`${homeDir}/`))) {
+    const suffix = raw.slice(homeDir.length).replace(/^\/+/, '');
+    return suffix ? `~/${suffix}` : '~';
+  }
+  return raw;
+}
+
 function buildWorkspaceStatus(session) {
   const cwd = session?.cwd || null;
   const taskMode = session?.taskMode || 'local';
   const workspaceStatus = {
     cwd,
+    cwdDisplay: formatWorkspaceCwdDisplay(session, cwd),
     git: {
       available: false,
       branch: '',
@@ -2709,6 +2725,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
           cwd: session.cwd || null,
           totalCost: session.totalCost || 0,
           totalUsage: session.totalUsage || null,
+          lastUsage: session.lastUsage || null,
           workspaceStatus: buildWorkspaceStatus(session),
           taskMode: session.taskMode || 'local',
           sshHostId: session.sshHostId || '',
@@ -2730,6 +2747,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
             session.model = modelInput;
             session.updated = new Date().toISOString();
             saveSession(session);
+            sendWorkspaceStatus(ws, session.id, session);
           }
           wsSend(ws, { type: 'model_changed', model: modelInput });
           wsSend(ws, { type: 'system_message', message: `Codex 模型已切换为: ${modelInput}` });
@@ -2747,6 +2765,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
             session.model = model;
             session.updated = new Date().toISOString();
             saveSession(session);
+            sendWorkspaceStatus(ws, session.id, session);
           }
           wsSend(ws, { type: 'model_changed', model: modelKey });
           wsSend(ws, { type: 'system_message', message: `模型已切换为: ${modelKey}` });
@@ -2957,6 +2976,7 @@ function handleNewSession(ws, msg) {
     permissionMode: requestedMode,
     totalCost: 0,
     totalUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    lastUsage: null,
     messages: [],
     cwd: resolvedCwd,
     taskMode,
@@ -2976,6 +2996,7 @@ function handleNewSession(ws, msg) {
     cwd: session.cwd,
     totalCost: 0,
     totalUsage: session.totalUsage,
+    lastUsage: session.lastUsage || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
@@ -3059,6 +3080,7 @@ function handleLoadSession(ws, sessionId, requestId = '') {
 	    cwd: effectiveCwd,
 	    totalCost: session.totalCost || 0,
 	    totalUsage: session.totalUsage || null,
+      lastUsage: session.lastUsage || null,
       workspaceStatus: buildWorkspaceStatus(session),
 	    historyTotal: session.messages.length,
     historyBuffered: recentMessages.length,
@@ -3310,10 +3332,11 @@ function handleMessage(ws, msg, options = {}) {
 	      claudeSessionId: null,
 	      codexThreadId: null,
 	      model: agent === 'codex' ? resolveDefaultCodexModel() : null,
-	      permissionMode: mode || 'yolo',
-	      totalCost: 0,
-	      totalUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
-	      messages: [],
+		      permissionMode: mode || 'yolo',
+		      totalCost: 0,
+		      totalUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+          lastUsage: null,
+		      messages: [],
 	      cwd: resolvedCwd,
 	    };
 	  }
@@ -3365,6 +3388,7 @@ function handleMessage(ws, msg, options = {}) {
       cwd: session.cwd || null,
       totalCost: session.totalCost || 0,
       totalUsage: session.totalUsage || null,
+      lastUsage: session.lastUsage || null,
       workspaceStatus: buildWorkspaceStatus(session),
       updated: session.updated,
       hasUnread: false,
@@ -3844,6 +3868,7 @@ function handleImportNativeSession(ws, msg) {
     permissionMode: existingSession?.permissionMode || 'yolo',
     totalCost: existingSession?.totalCost || 0,
     totalUsage: existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    lastUsage: existingSession?.lastUsage || null,
     messages,
     cwd: cwd || existingSession?.cwd || null,
   };
@@ -3860,6 +3885,7 @@ function handleImportNativeSession(ws, msg) {
     cwd: session.cwd,
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
+    lastUsage: session.lastUsage || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
@@ -3946,6 +3972,7 @@ function handleImportCodexSession(ws, msg) {
     permissionMode: existingSession?.permissionMode || 'yolo',
     totalCost: existingSession?.totalCost || 0,
     totalUsage: parsed.totalUsage || existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    lastUsage: parsed.lastUsage || existingSession?.lastUsage || null,
     messages: parsed.messages,
     cwd: parsed.meta.cwd || existingSession?.cwd || null,
   };
@@ -3963,6 +3990,7 @@ function handleImportCodexSession(ws, msg) {
     cwd: session.cwd,
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
+    lastUsage: session.lastUsage || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,

@@ -154,6 +154,7 @@
   font-weight: 700;
 }
 .composer-status-segment.is-context,
+.composer-status-segment.is-total,
 .composer-status-segment.is-git {
   flex-shrink: 0;
 }

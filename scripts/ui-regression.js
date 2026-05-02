@@ -8,6 +8,7 @@ const { readPublicCss } = require('./read-public-css');
 const root = path.resolve(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+const runtimeJs = fs.readFileSync(path.join(root, 'lib', 'agent-runtime.js'), 'utf8');
 const styleCss = readPublicCss(root);
 
 function assert(condition, message) {
@@ -97,9 +98,27 @@ assert(
 );
 assert(
   /function\s+resolveContextWindowTokens/.test(appJs) &&
-    /function\s+formatContextUsageText/.test(appJs) &&
+    /function\s+formatCurrentContextUsageText/.test(appJs) &&
+    /function\s+formatTotalUsageText/.test(appJs) &&
     /function\s+formatWorkspaceGitText/.test(appJs),
-  'composer status line should format model context and git status explicitly'
+  'composer status line should format current context total usage and git status explicitly'
+);
+assert(
+  /cwdDisplay/.test(serverJs) &&
+    /currentWorkspaceStatus\?\.cwdDisplay/.test(appJs) &&
+    /~\//.test(appJs),
+  'composer status line should preserve a visible tilde in home-directory paths'
+);
+assert(
+  /lastUsage:\s*payload\.lastUsage\s*\?\s*deepClone\(payload\.lastUsage\)\s*:\s*null/.test(appJs) &&
+    /lastUsage:\s*session\.lastUsage\s*\|\|\s*null/.test(serverJs) &&
+    /type:\s*'usage'[\s\S]*lastUsage/.test(runtimeJs),
+  'runtime usage updates should distinguish current-context usage from cumulative totals'
+);
+assert(
+  /composer-status-segment is-model/.test(appJs) &&
+    /String\(currentModel \|\| ''\)\.trim\(\) \|\| 'unknown-model'/.test(appJs),
+  'composer status line should render the full current model string as the leading segment'
 );
 assert(
   /function\s+broadcastBackgroundDone\(sessionId,\s*entry,\s*excludeWs\s*=\s*null\)/.test(serverJs) &&

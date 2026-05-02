@@ -118,6 +118,7 @@
   let currentCwd = null;
   let currentWorkspaceStatus = null;
   let currentTotalUsage = null;
+  let currentLastUsage = null;
   let currentTaskMode = 'local';
   let currentRemoteCwd = '';
   let currentSessionRunning = false;
@@ -899,6 +900,7 @@
       cwd: payload.cwd || null,
       totalCost: typeof payload.totalCost === 'number' ? payload.totalCost : 0,
       totalUsage: payload.totalUsage ? deepClone(payload.totalUsage) : null,
+      lastUsage: payload.lastUsage ? deepClone(payload.lastUsage) : null,
       workspaceStatus: payload.workspaceStatus ? deepClone(payload.workspaceStatus) : null,
       updated: payload.updated || null,
       isRunning: !!payload.isRunning,
@@ -1278,6 +1280,7 @@
     const raw = String(pathValue || '').trim();
     if (!raw) return 'no-cwd';
     const normalized = raw.replace(/\/+$/, '') || raw;
+    if (currentWorkspaceStatus?.cwdDisplay) return currentWorkspaceStatus.cwdDisplay;
     const homeDir = (window.__CC_HOME_DIR__ || '').trim();
     if (homeDir && normalized.startsWith(homeDir)) {
       const suffix = normalized.slice(homeDir.length).replace(/^\/+/, '');
@@ -1304,23 +1307,30 @@
       return null;
     }
     if (normalizedAgent === 'codex') {
+      if (raw.startsWith('gpt-5.5')) return 1_000_000;
       if (raw.startsWith('gpt-5.4')) return 1_000_000;
       return null;
     }
     return null;
   }
 
-  function formatContextUsageText() {
+  function formatCurrentContextUsageText() {
     const total = resolveContextWindowTokens(currentAgent, currentModel);
     let used = null;
-    if (currentAgent === 'codex') {
-      used = Number(currentTotalUsage?.inputTokens || 0);
-    } else if (currentTotalUsage && Number(currentTotalUsage.inputTokens || 0) > 0) {
-      used = Number(currentTotalUsage.inputTokens || 0);
+    if (currentLastUsage) {
+      used = Number(currentLastUsage.inputTokens || 0) + Number(currentLastUsage.cachedInputTokens || 0);
     }
     const usedText = used == null ? '?' : formatTokenCompact(used);
     const totalText = total == null ? '?' : formatTokenCompact(total);
     return `${usedText} / ${totalText}`;
+  }
+
+  function formatTotalUsageText() {
+    if (!currentTotalUsage) return '?';
+    const total = Number(currentTotalUsage.inputTokens || 0)
+      + Number(currentTotalUsage.cachedInputTokens || 0)
+      + Number(currentTotalUsage.outputTokens || 0);
+    return formatTokenCompact(total);
   }
 
   function formatWorkspaceGitText() {
@@ -1341,7 +1351,8 @@
     }
     const modelText = String(currentModel || '').trim() || 'unknown-model';
     const cwdText = formatWorkspacePath(resolveComposerCwd());
-    const contextText = formatContextUsageText();
+    const contextText = formatCurrentContextUsageText();
+    const totalUsageText = formatTotalUsageText();
     const gitText = formatWorkspaceGitText();
     composerStatusline.innerHTML = [
       `<span class="composer-status-segment is-model">${escapeHtml(modelText)}</span>`,
@@ -1349,6 +1360,8 @@
       `<span class="composer-status-segment is-cwd">${escapeHtml(cwdText)}</span>`,
       `<span class="composer-status-separator">|</span>`,
       `<span class="composer-status-segment is-context">${escapeHtml(contextText)}</span>`,
+      `<span class="composer-status-separator">|</span>`,
+      `<span class="composer-status-segment is-total">${escapeHtml(totalUsageText)}</span>`,
       `<span class="composer-status-separator">|</span>`,
       `<span class="composer-status-segment is-git">${escapeHtml(gitText)}</span>`,
     ].join('');
@@ -1436,10 +1449,11 @@
     currentSessionId = null;
     loadedHistorySessionId = null;
     clearSessionLoading();
-    currentCwd = null;
-    currentWorkspaceStatus = null;
-    currentTotalUsage = null;
-    currentTaskMode = 'local';
+	    currentCwd = null;
+	    currentWorkspaceStatus = null;
+	    currentTotalUsage = null;
+      currentLastUsage = null;
+	    currentTaskMode = 'local';
     currentRemoteCwd = '';
     setCurrentSessionRunningState(false);
     currentModel = currentAgent === 'claude' ? 'opus' : '';
@@ -1479,10 +1493,11 @@
     chatTitle.textContent = snapshot.title || '新会话';
     setCurrentAgent(snapshot.agent);
     setCurrentSessionRunningState(snapshot.isRunning);
-    setStatsDisplay(snapshot);
-    currentCwd = snapshot.cwd || null;
-    currentWorkspaceStatus = snapshot.workspaceStatus ? deepClone(snapshot.workspaceStatus) : null;
-    currentTaskMode = snapshot.taskMode || 'local';
+	    setStatsDisplay(snapshot);
+	    currentCwd = snapshot.cwd || null;
+	    currentWorkspaceStatus = snapshot.workspaceStatus ? deepClone(snapshot.workspaceStatus) : null;
+      currentLastUsage = snapshot.lastUsage ? deepClone(snapshot.lastUsage) : null;
+	    currentTaskMode = snapshot.taskMode || 'local';
     currentRemoteCwd = snapshot.remoteCwd || '';
     updateCwdBadge();
     if (snapshot.mode && MODE_LABELS[snapshot.mode]) {
@@ -1682,9 +1697,10 @@
     });
   }
 
-  function setStatsDisplay(msg) {
-    currentTotalUsage = msg?.totalUsage ? deepClone(msg.totalUsage) : null;
-    if (currentAgent === 'codex' && msg && msg.totalUsage) {
+	  function setStatsDisplay(msg) {
+	    currentTotalUsage = msg?.totalUsage ? deepClone(msg.totalUsage) : null;
+      currentLastUsage = msg?.lastUsage ? deepClone(msg.lastUsage) : null;
+	    if (currentAgent === 'codex' && msg && msg.totalUsage) {
       const usage = msg.totalUsage;
       if ((usage.inputTokens || 0) > 0 || (usage.outputTokens || 0) > 0) {
         const cacheText = usage.cachedInputTokens ? ` · cache ${usage.cachedInputTokens}` : '';
@@ -2036,11 +2052,15 @@
 
       case 'usage':
         if (msg.totalUsage) {
+          currentLastUsage = msg.lastUsage ? deepClone(msg.lastUsage) : currentLastUsage;
           currentTotalUsage = deepClone(msg.totalUsage);
           const cacheText = msg.totalUsage.cachedInputTokens ? ` · cache ${msg.totalUsage.cachedInputTokens}` : '';
           costDisplay.textContent = `in ${msg.totalUsage.inputTokens} · out ${msg.totalUsage.outputTokens}${cacheText}`;
           if (currentSessionId) {
-            updateCachedSession(currentSessionId, (snapshot) => { snapshot.totalUsage = deepClone(msg.totalUsage); });
+            updateCachedSession(currentSessionId, (snapshot) => {
+              snapshot.totalUsage = deepClone(msg.totalUsage);
+              snapshot.lastUsage = msg.lastUsage ? deepClone(msg.lastUsage) : snapshot.lastUsage || null;
+            });
           }
           renderComposerStatusline();
         }
