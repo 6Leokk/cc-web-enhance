@@ -455,6 +455,21 @@ body.session-loading-active {
   letter-spacing: var(--chat-title-letter-spacing);
 }
 .chat-title:hover { background: var(--chat-title-hover-bg); }
+.chat-title.is-editing {
+  display: inline-block;
+  padding: 2px 8px;
+  min-width: 96px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  cursor: text;
+  background: var(--input-surface-bg);
+  border: 1px solid var(--input-surface-border);
+  border-radius: var(--input-surface-radius);
+  box-shadow: var(--input-surface-shadow);
+  outline: 1px solid var(--accent);
+}
+.chat-title.is-editing:hover { background: var(--input-surface-bg); }
 .chat-agent-btn {
   appearance: none;
   font-size: 11px;
@@ -540,7 +555,13 @@ body.session-loading-active {
   height: 7px;
   border-radius: 50%;
   background: currentColor;
+}
+.chat-runtime-state.is-running::before {
   animation: pulse 1.1s infinite;
+}
+.chat-runtime-state.is-complete::before {
+  animation: none;
+  opacity: 0.72;
 }
 .cost-display {
   display: none !important;

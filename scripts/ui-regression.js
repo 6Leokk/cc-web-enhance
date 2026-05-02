@@ -58,9 +58,30 @@ assert(
   'session_list handling should compare previous and latest current-session metadata'
 );
 assert(
+  /function\s+updateChatRuntimeStateBadge\(\)/.test(appJs) &&
+    /chatRuntimeState\.textContent\s*=\s*running\s*\?\s*'运行中'\s*:\s*'已完成'/.test(appJs) &&
+    /chatRuntimeState\.classList\.toggle\('is-running',\s*running\)/.test(appJs) &&
+    /chatRuntimeState\.classList\.toggle\('is-complete',\s*!running\)/.test(appJs),
+  'header runtime badge should switch between running and completed states'
+);
+assert(
+  /chatTitle\.title\s*=\s*\[titleText,\s*currentCwd\]\.filter\(Boolean\)\.join\('\\n'\)/.test(appJs) &&
+    /chatCwd\.hidden\s*=\s*true;/.test(appJs),
+  'cwd should be retained outside the header status slot by moving it into the title tooltip'
+);
+assert(
+  /\.chat-runtime-state\.is-running::before\s*\{[\s\S]*animation:\s*pulse 1\.1s infinite;/.test(styleCss) &&
+    /\.chat-runtime-state\.is-complete::before\s*\{[\s\S]*animation:\s*none;/.test(styleCss),
+  'header runtime badge indicator should animate only while running'
+);
+assert(
   /function\s+broadcastBackgroundDone\(sessionId,\s*entry,\s*excludeWs\s*=\s*null\)/.test(serverJs) &&
     /broadcastBackgroundDone\(sessionId,\s*entry,\s*entry\.ws\)/.test(serverJs),
   'process completion should notify other connected clients even when one websocket receives the final stream'
+);
+assert(
+  /function\s+finishGenerating\(sessionId\)[\s\S]*currentSessionId\s*=\s*sessionId/.test(appJs) === false,
+  'runtime completion should not mutate currentSessionId after navigation state changes',
 );
 
 console.log('ui regression checks passed');

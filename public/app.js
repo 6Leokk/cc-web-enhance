@@ -1245,31 +1245,46 @@
     return sessions.filter((s) => normalizeAgent(s.agent) === currentAgent);
   }
 
-  function shouldOverlayRuntimeBadge() {
-    return window.matchMedia('(max-width: 768px), (pointer: coarse)').matches;
+  function updateChatTitleMeta() {
+    if (!chatTitle) return;
+    const titleText = chatTitle.textContent.trim();
+    chatTitle.title = [titleText, currentCwd].filter(Boolean).join('\n');
   }
 
   function updateCwdBadge() {
-    if (!chatCwd) return;
-    if (currentCwd) {
-      const parts = currentCwd.replace(/\/+$/, '').split('/');
-      const short = parts.slice(-2).join('/') || currentCwd;
-      chatCwd.textContent = '~/' + short;
-      chatCwd.title = currentCwd;
-    } else {
-      chatCwd.textContent = '';
-      chatCwd.title = '';
+    if (chatCwd) {
+      if (currentCwd) {
+        const parts = currentCwd.replace(/\/+$/, '').split('/');
+        const short = parts.slice(-2).join('/') || currentCwd;
+        chatCwd.textContent = '~/' + short;
+        chatCwd.title = currentCwd;
+      } else {
+        chatCwd.textContent = '';
+        chatCwd.title = '';
+      }
+      chatCwd.hidden = true;
     }
-    chatCwd.hidden = !currentCwd || (currentSessionRunning && shouldOverlayRuntimeBadge());
+    updateChatTitleMeta();
+  }
+
+  function updateChatRuntimeStateBadge() {
+    if (!chatRuntimeState) return;
+    const hasSession = !!currentSessionId;
+    const running = !!currentSessionRunning;
+    chatRuntimeState.hidden = !hasSession;
+    if (!hasSession) {
+      chatRuntimeState.textContent = '';
+      chatRuntimeState.classList.remove('is-running', 'is-complete');
+      return;
+    }
+    chatRuntimeState.textContent = running ? '运行中' : '已完成';
+    chatRuntimeState.classList.toggle('is-running', running);
+    chatRuntimeState.classList.toggle('is-complete', !running);
   }
 
   function setCurrentSessionRunningState(isRunning) {
-    const running = !!isRunning;
-    currentSessionRunning = running;
-    if (chatRuntimeState) {
-      chatRuntimeState.hidden = !running;
-      chatRuntimeState.textContent = running ? '运行中' : '';
-    }
+    currentSessionRunning = !!isRunning;
+    updateChatRuntimeStateBadge();
     updateCwdBadge();
   }
 
@@ -1316,8 +1331,8 @@
     currentSessionId = null;
     loadedHistorySessionId = null;
     clearSessionLoading();
-    setCurrentSessionRunningState(false);
     currentCwd = null;
+    setCurrentSessionRunningState(false);
     currentModel = currentAgent === 'claude' ? 'opus' : '';
     isGenerating = false;
     pendingText = '';
@@ -1420,7 +1435,8 @@
     const loading = !!sessionId;
     const blocking = options.blocking !== false;
     const requestId = options.requestId || '';
-    activeSessionLoad = loading ? { sessionId, blocking, requestId, snapshot: null } : null;
+    const anchorToBottom = options.anchorToBottom !== undefined ? !!options.anchorToBottom : blocking;
+    activeSessionLoad = loading ? { sessionId, blocking, requestId, snapshot: null, anchorToBottom } : null;
     const showOverlay = !!(loading && blocking);
     document.body.classList.toggle('session-loading-active', showOverlay);
     sessionLoadingOverlay.hidden = !showOverlay;
@@ -1446,11 +1462,16 @@
       (!sessionId || activeSessionLoad.sessionId === sessionId));
   }
 
+  function shouldAnchorBottomAfterSessionLoad(sessionId) {
+    return !!(activeSessionLoad &&
+      activeSessionLoad.anchorToBottom &&
+      (!sessionId || activeSessionLoad.sessionId === sessionId));
+  }
+
   function shouldApplySessionInfo(msg) {
     if (activeSessionLoad) {
       if (activeSessionLoad.sessionId !== msg?.sessionId) return false;
-      if (msg?.requestId) return activeSessionLoad.requestId === msg.requestId;
-      return true;
+      return !!msg?.requestId && activeSessionLoad.requestId === msg.requestId;
     }
     if (msg?.requestId) return false;
     return !currentSessionId || currentSessionId === msg?.sessionId;
@@ -1459,16 +1480,17 @@
   function shouldApplySessionHistoryChunk(msg) {
     if (activeSessionLoad) {
       if (activeSessionLoad.sessionId !== msg?.sessionId) return false;
-      if (msg?.requestId) return activeSessionLoad.requestId === msg.requestId;
-      return true;
+      return !!msg?.requestId && activeSessionLoad.requestId === msg.requestId;
     }
     if (msg?.requestId) return false;
     return msg?.sessionId === currentSessionId && loadedHistorySessionId === msg.sessionId;
   }
 
   function finishSessionSwitch(sessionId) {
-    if (isBlockingSessionLoad(sessionId)) {
+    if (shouldAnchorBottomAfterSessionLoad(sessionId)) {
       forceMessagesBottomAfterSessionSwitch();
+    }
+    if (isBlockingSessionLoad(sessionId)) {
       requestAnimationFrame(() => clearSessionLoading(sessionId));
       return;
     }
@@ -1487,12 +1509,13 @@
     if (!sessionId) return;
     const blocking = options.blocking !== false;
     const force = options.force === true;
+    const anchorToBottom = options.anchorToBottom !== undefined ? !!options.anchorToBottom : blocking;
     if (!force && activeSessionLoad?.sessionId === sessionId) return;
     if (!force && sessionId === currentSessionId && !activeSessionLoad) return;
     renderEpoch++;
     loadedHistorySessionId = null;
     const requestId = `${Date.now()}-${++sessionLoadRequestSeq}`;
-    setSessionLoading(sessionId, { blocking, label: options.label, requestId });
+    setSessionLoading(sessionId, { blocking, label: options.label, requestId, anchorToBottom });
     send({ type: 'load_session', sessionId, requestId });
   }
 
@@ -1510,8 +1533,15 @@
 
   function openSession(sessionId, options = {}) {
     if (!sessionId) return;
+    const switchingSessions = sessionId !== currentSessionId;
+    const anchorToBottom = options.anchorToBottom !== undefined ? !!options.anchorToBottom : switchingSessions;
     if (options.forceSync) {
-      beginSessionSwitch(sessionId, { blocking: options.blocking !== false, force: true, label: options.label });
+      beginSessionSwitch(sessionId, {
+        blocking: options.blocking !== false,
+        force: true,
+        label: options.label,
+        anchorToBottom,
+      });
       return;
     }
     if (!options.force && sessionId === currentSessionId && !activeSessionLoad) return;
@@ -1522,10 +1552,20 @@
       return;
     }
     if (disposition === 'weak' && showCachedSession(sessionId)) {
-      beginSessionSwitch(sessionId, { blocking: false, force: true, label: options.label });
+      beginSessionSwitch(sessionId, {
+        blocking: false,
+        force: true,
+        label: options.label,
+        anchorToBottom,
+      });
       return;
     }
-    beginSessionSwitch(sessionId, { blocking: options.blocking !== false, force: options.force === true, label: options.label });
+    beginSessionSwitch(sessionId, {
+      blocking: options.blocking !== false,
+      force: options.force === true,
+      label: options.label,
+      anchorToBottom,
+    });
   }
 
   function setStatsDisplay(msg) {
@@ -1834,6 +1874,7 @@
         updateCachedSession(msg.sessionId, (snapshot) => { snapshot.title = msg.title; });
         if (msg.sessionId === currentSessionId) {
           chatTitle.textContent = msg.title;
+          updateCwdBadge();
         }
         renderSessionList();
         break;
@@ -2177,7 +2218,6 @@
       scrollToBottom();
     }
 
-    if (sessionId) currentSessionId = sessionId;
     pendingText = '';
     pendingFinalAssistantMessages = null;
     streamingSegmentEls = [];
@@ -3030,14 +3070,7 @@
     if (!currentSessionId || chatTitle.contentEditable === 'true') return;
     const originalText = chatTitle.textContent;
     chatTitle.contentEditable = 'true';
-    chatTitle.style.background = '#fff';
-    chatTitle.style.outline = '1px solid var(--accent)';
-    chatTitle.style.borderRadius = '6px';
-    chatTitle.style.padding = '2px 8px';
-    chatTitle.style.minWidth = '96px';
-    chatTitle.style.whiteSpace = 'normal';
-    chatTitle.style.overflow = 'visible';
-    chatTitle.style.textOverflow = 'clip';
+    chatTitle.classList.add('is-editing');
     chatTitle.focus();
     // Select all text
     const range = document.createRange();
@@ -3048,16 +3081,10 @@
 
     function finish(save) {
       chatTitle.contentEditable = 'false';
-      chatTitle.style.background = '';
-      chatTitle.style.outline = '';
-      chatTitle.style.borderRadius = '';
-      chatTitle.style.padding = '';
-      chatTitle.style.minWidth = '';
-      chatTitle.style.whiteSpace = '';
-      chatTitle.style.overflow = '';
-      chatTitle.style.textOverflow = '';
+      chatTitle.classList.remove('is-editing');
       const newTitle = chatTitle.textContent.trim() || originalText;
       chatTitle.textContent = newTitle;
+      updateCwdBadge();
       if (save && newTitle !== originalText && currentSessionId) {
         send({ type: 'rename_session', sessionId: currentSessionId, title: newTitle });
       }
@@ -3066,7 +3093,12 @@
     chatTitle.addEventListener('blur', () => finish(true), { once: true });
     chatTitle.addEventListener('keydown', function handler(e) {
       if (e.key === 'Enter') { e.preventDefault(); chatTitle.removeEventListener('keydown', handler); chatTitle.blur(); }
-      if (e.key === 'Escape') { chatTitle.textContent = originalText; chatTitle.removeEventListener('keydown', handler); chatTitle.blur(); }
+      if (e.key === 'Escape') {
+        chatTitle.textContent = originalText;
+        updateCwdBadge();
+        chatTitle.removeEventListener('keydown', handler);
+        chatTitle.blur();
+      }
     });
   });
 
@@ -5382,7 +5414,12 @@
     } else if (ws.readyState === 1 && currentSessionId) {
       // Preserve active streaming UI when returning to foreground.
       if (isGenerating || currentSessionRunning) {
-        send({ type: 'load_session', sessionId: currentSessionId });
+        openSession(currentSessionId, {
+          forceSync: true,
+          blocking: false,
+          anchorToBottom: messagesWereNearBottomBeforeHidden,
+          label: '正在恢复当前会话…',
+        });
       } else {
         send({ type: 'list_sessions' });
       }
