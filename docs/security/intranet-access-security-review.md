@@ -57,3 +57,35 @@ Commands and results:
 
 Residual risk:
 - Existing code legitimately references `~/.codex/config.toml` for local Codex config reading. This branch did not add copying of that file and did not commit runtime credentials.
+
+## Round 4: Built-in frp Final Review
+- Date: 2026-05-04
+- Status: Passed; final push pending.
+
+Scope:
+- Built-in frp binary download and SHA256 verification.
+- Generated config and process manager.
+- `server.js` auto-start integration.
+- README, deployment docs, `.env.example`, and progress docs.
+
+Commands and results:
+- `npm run frp:download`: passed; downloaded official `v0.68.1` asset `frp_0.68.1_linux_amd64.tar.gz`.
+- Verified SHA256: `4a4e88987d39561e1b3b3b23d0ede48a457eebf76a87231999957e870f5f02b6`.
+- `frp/bin/frpc -v && frp/bin/frps -v`: both returned `0.68.1`.
+- `npm run regression`: passed, including `scripts/intranet-frp-safety-regression.js` and `scripts/frp-builtin-regression.js`.
+- `git ls-files '*.js' ':!:public/vendor/*' | xargs -r -n 1 node --check`: passed.
+- `bash -n scripts/frp/check-frp-config.sh && bash -n scripts/frp/check-local-cc-web.sh`: passed.
+- `git diff --check`: passed.
+- `git ls-files frp/bin frp/conf frp/logs frp/run frp/tmp`: no tracked files.
+- `ps -ef | grep -E 'frpc|frps' | grep -v grep || true`: no lingering frp process.
+- Tracked-only dangerous command scan outside docs/archive: no hits for `rm -rf`, `git reset --hard`, `git clean -fd`, or `chmod 777`.
+- Common secret-shaped scan: no hits.
+- Dashboard scan: only regression assertion confirming dashboard is not enabled by default.
+
+Allowed findings:
+- `0.0.0.0` appears in warnings, explicit opt-in tests, historical archived notes, and existing explicit-bind handling; default remains `127.0.0.1:8083`.
+- `token`, `password`, and `secret` findings are existing auth logic, test fixtures, placeholder `YOUR_*` values, or safety documentation.
+- Existing `~/.codex/config.toml` references remain local runtime references; this work did not add copying or committing Codex auth/config files.
+
+Residual risk:
+- Generated local `frp/conf/*.toml` may contain a real token after user setup. The path is ignored by git and must stay out of commits.

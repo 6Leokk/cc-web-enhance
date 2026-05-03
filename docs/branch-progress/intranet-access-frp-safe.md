@@ -4,7 +4,7 @@
 Deliver a safe frp-first intranet remote access path for `cc-web-enhance`, with docs, scripts, tests, and staged commits, while preserving the default local-only bind.
 
 ## Current Phase
-Built-in frp continuation in progress: Stage 4 docs completed, final verification pending
+Built-in frp continuation verified; final review record commit and push pending
 
 ## Completed
 - Checked repository status, branch, and remotes
@@ -32,7 +32,6 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 - Archived superseded root planning files to `archive/old/2026-05-04-intranet-frp-initial/` rather than deleting them
 
 ## Pending
-- Final full regression and security scan
 - Final built-in frp checkpoint commit and push
 
 ## Key Design Decisions
@@ -83,6 +82,12 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 | `node scripts/frp-builtin-regression.js` | PASS | Built-in frp downloader/config/manager/docs checks passed |
 | Stage 3 frps process check | PASS | Managed `frps` started on loopback random port, status reported running, stop cleaned the pid |
 | Stage 3 server integration check | PASS | `server.js` started managed frps and SIGTERM cleaned the child process |
+| Built-in final `npm run frp:download` | PASS | Official `v0.68.1` asset downloaded; SHA256 `4a4e88987d39561e1b3b3b23d0ede48a457eebf76a87231999957e870f5f02b6` verified |
+| Built-in final `npm run regression` | PASS | Full regression chain passed, including intranet frp and built-in frp regressions |
+| Built-in final JS syntax | PASS | All tracked non-vendor JS passed `node --check` |
+| Built-in final shell syntax | PASS | `scripts/frp/check-frp-config.sh` and `scripts/frp/check-local-cc-web.sh` passed `bash -n` |
+| Built-in final tracked runtime check | PASS | `git ls-files frp/bin frp/conf frp/logs frp/run frp/tmp` returned no tracked files |
+| Built-in final process cleanup | PASS | No `frpc` or `frps` process remained |
 
 ## Superpower Usage
 - `superpowers:using-superpowers` used to start the session
@@ -96,7 +101,9 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 - `superpowers:finishing-a-development-branch` loaded for final branch completion. User request explicitly requires pushing this branch, so the selected completion path is push branch to origin without merge or force-push.
 - Spec reviewer subagent not used yet; will fall back to manual review if tool policy prevents delegation
 - Built-in frp continuation used manual internal gates for design, plan, Stage 1 binary, Stage 2 config, Stage 3 process, and Stage 4 docs.
-- `superpowers:verification-before-completion` reloaded before final built-in frp verification; final reviewer gate is pending.
+- `superpowers:verification-before-completion` reloaded before final built-in frp verification; final reviewer gate passed.
+- `superpowers:requesting-code-review` loaded for final reviewer gate. Subagent dispatch was not used because the current tool policy requires explicit user authorization for subagents; manual reviewer checklist was used instead.
+- `superpowers:finishing-a-development-branch` loaded for final branch handling. User instruction explicitly selected push-to-origin, so no merge/PR prompt was used.
 
 ## Commit History
 - `c87369c` docs: add intranet access design
@@ -108,6 +115,8 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 - `f772170` feat: add frp binary downloader
 - `429c556` feat: generate built-in frp config
 - `835546b` feat: manage built-in frp process
+- `6912fcf` docs: explain built-in frp workflow
+- `d5eb1a0` docs: archive superseded intranet frp notes
 
 ## Final Push Status
 - Pushed to `origin feature/intranet-access-frp-safe`.

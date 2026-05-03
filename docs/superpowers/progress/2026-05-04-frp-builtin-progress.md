@@ -18,7 +18,7 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 | Stage 2 config gate | PASS | `lib/frp-config.js` renders client/ip, client/domain, server config; `npm run frp:setup` wrote ignored config |
 | Stage 3 process gate | PASS | `lib/frp-manager.js` and `scripts/frp-control.js` manage start/stop/status; server integration test confirmed SIGTERM cleans the child frp process |
 | Stage 4 docs gate | PASS | `.env.example`, README, deployment docs, and design docs describe built-in frp flow |
-| Final reviewer gate | Pending | Full verification not yet complete |
+| Final reviewer gate | PASS | Full regression, syntax, shell, tracked-only security scan, frp checksum, tracked runtime, and process-cleanup checks passed |
 
 ## Completed
 - Verified git baseline and pushed current HEAD.
@@ -57,9 +57,18 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 - Ran `node --check scripts/frp-builtin-regression.js scripts/frp-download.js scripts/frp-setup.js scripts/frp-control.js lib/frp-config.js lib/frp-manager.js server.js`: passed.
 - Ran `git diff --check`: passed.
 - Archived old root-level planning files (`findings.md`, `task_plan.md`, `progress.md`) to `archive/old/2026-05-04-intranet-frp-initial/` because their initial-discovery notes are superseded by `docs/superpowers/` and `docs/branch-progress/`.
+- Ran final `npm run frp:download`: downloaded official `v0.68.1`, asset `frp_0.68.1_linux_amd64.tar.gz`, SHA256 `4a4e88987d39561e1b3b3b23d0ede48a457eebf76a87231999957e870f5f02b6`.
+- Ran final `npm run regression`: passed.
+- Ran final `git ls-files '*.js' ':!:public/vendor/*' | xargs -r -n 1 node --check`: passed.
+- Ran final `bash -n scripts/frp/check-frp-config.sh && bash -n scripts/frp/check-local-cc-web.sh`: passed.
+- Ran final `git diff --check`: passed.
+- Ran final `git ls-files frp/bin frp/conf frp/logs frp/run frp/tmp`: no tracked files.
+- Ran final `ps -ef | grep -E 'frpc|frps' | grep -v grep || true`: no lingering frp process.
+- Ran tracked-only dangerous command and secret-shaped scans: no executable dangerous-command hits and no common real secret-shaped hits.
+- Manual reviewer gate completed because subagent code review is not available without explicit subagent delegation. No blocking issues found.
 
 ## Next Step
-Commit the archive marker, then run final regression, syntax, shell, security, git, and process-cleanup checks.
+Commit final review records, then push `feature/intranet-access-frp-safe` to origin and verify the remote ref.
 
 ## Checkpoint Commits
 - `fb3c0fe` docs: record frp push status
@@ -67,3 +76,5 @@ Commit the archive marker, then run final regression, syntax, shell, security, g
 - `f772170` feat: add frp binary downloader
 - `429c556` feat: generate built-in frp config
 - `835546b` feat: manage built-in frp process
+- `6912fcf` docs: explain built-in frp workflow
+- `d5eb1a0` docs: archive superseded intranet frp notes
