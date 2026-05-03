@@ -12,6 +12,31 @@
 - `cc-web` 本体只监听 `127.0.0.1:8083`
 - frp 只做转发，不改变 cc-web 默认监听地址
 
+## 内置 frp 运行方式
+本分支将 frp 的下载校验、配置生成和进程管理集成到仓库脚本中。用户仍需要提供自己的公网 frps 地址和强 token，但不需要手动查找 frp Release、解压二进制或手写最小配置。
+
+推荐用户流：
+
+```bash
+cp .env.example .env
+# 编辑 .env 中的 FRP_* 变量
+npm run frp:download
+npm run frp:setup
+npm start
+```
+
+运行目录：
+
+```text
+frp/
+  bin/   # 官方 Release 下载并 SHA256 校验后的 frpc/frps
+  conf/  # npm run frp:setup 生成的本地配置，可能包含真实 token
+  logs/  # frpc/frps stdout/stderr
+  run/   # pid 文件
+```
+
+`frp/bin/`、`frp/conf/`、`frp/logs/`、`frp/run/` 和 `frp/tmp/` 均被 `.gitignore` 忽略。`server.js` 只在用户显式设置 `FRP_MODE=client` 或 `FRP_MODE=server` 时尝试自动启动 frp；`FRP_AUTO_START=0` 可禁用自动启动。
+
 ## frp 方案说明
 ### TCP 暴露模式
 适合最直接的端口转发。用户通过公网 IP + 端口访问，适合快速验证。
@@ -23,7 +48,7 @@
 推荐在公网入口前再放一层反代，负责 TLS、基础访问控制和日志。
 
 ### 推荐部署方式
-第一阶段推荐 `frps` + `frpc` + HTTPS 反代。这样可控、好排障、易写文档，也便于后续替换 tunnel provider。
+第一阶段推荐内置 `frpc` + 公网 `frps` + HTTPS 反代。公网机器也可以用本仓库的 `FRP_MODE=server` 生成并管理 `frps`，但仍建议将公网入口放在防火墙和反代访问控制之后。这样可控、好排障、易写文档，也便于后续替换 tunnel provider。
 
 ## 安全边界
 - cc-web 自身必须启用认证
@@ -33,6 +58,7 @@
 - 不建议直接裸露 frp dashboard 或管理端口
 - 不建议把 cc-web 改成 `0.0.0.0`
 - 不允许提交真实 token、cookie、session、auth header
+- 不允许把 `frp/conf/*.toml`、`frp/bin/*` 或 frp 日志提交到仓库
 
 ## 替代方案比较
 - frp：稳定、可控、部署简单，适合第一阶段

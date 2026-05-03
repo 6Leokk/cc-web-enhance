@@ -78,6 +78,18 @@ copy .env.example .env  & REM 可选
 
 默认服务仍只监听 `127.0.0.1:8083`。需要从公网安全访问内网机器时，推荐使用 frp 把公网入口转发到内网机器的本地地址，不要把 cc-web 默认改成公网监听。
 
+本分支内置 frp 下载、配置生成和进程管理，不需要手动下载 frp：
+
+```bash
+cp .env.example .env
+# 编辑 .env：填写 FRP_SERVER_ADDR、FRP_SERVER_PORT、FRP_TOKEN，并选择 FRP_TYPE=ip 或 domain
+npm run frp:download
+npm run frp:setup
+npm start
+```
+
+`npm start` 会在 `FRP_MODE=client` 或 `FRP_MODE=server` 时自动启动对应的 `frpc`/`frps`。也可以单独使用 `npm run frp:start`、`npm run frp:stop`、`npm run frp:status` 管理 frp 进程。生成的二进制、配置、日志和 pid 文件位于 `frp/`，其中 `frp/bin/`、`frp/conf/`、`frp/logs/`、`frp/run/` 均已被 `.gitignore` 忽略。
+
 详细步骤见 [frp 部署说明](./docs/deploy-frp.md)，架构与替代方案见 [内网远程访问设计](./docs/intranet-access-design.md)。
 
 ## 配置
@@ -91,6 +103,21 @@ copy .env.example .env  & REM 可选
 | `CC_WEB_HOST` | 否 | `127.0.0.1` | 服务监听地址；frp 模式建议保持默认 |
 | `PORT` | 否 | - | 兼容旧变量；`CC_WEB_PORT` 优先 |
 | `HOST` | 否 | - | 兼容旧变量；`CC_WEB_HOST` 优先 |
+| `FRP_MODE` | 否 | `disabled` | 内置 frp 模式：`disabled` / `client` / `server` |
+| `FRP_TYPE` | 否 | `ip` | 客户端穿透类型：公网 IP 端口模式 `ip`，或域名模式 `domain` |
+| `FRP_SERVER_ADDR` | frp client 必填 | `YOUR_FRP_SERVER_IP` | 公网 frps 地址，占位符需要替换 |
+| `FRP_SERVER_PORT` | 否 | `7000` | frps 连接端口 |
+| `FRP_TOKEN` | frp 启用时必填 | `YOUR_FRP_TOKEN` | frp 强 token；只写入本地 `.env`，不要提交 |
+| `FRP_PUBLIC_PORT` | `FRP_TYPE=ip` 时必填 | `YOUR_PUBLIC_PORT` | 公网 TCP 访问端口 |
+| `FRP_CUSTOM_DOMAIN` | `FRP_TYPE=domain` 时可填 | `YOUR_DOMAIN` | HTTP 域名模式的完整域名 |
+| `FRP_SUBDOMAIN` | 否 | - | HTTP 域名模式的 frp subdomain |
+| `FRP_BIND_PORT` | server 模式可填 | `7000` | frps bindPort |
+| `FRP_VHOST_HTTP_PORT` | server 域名模式可填 | - | frps HTTP vhost 端口 |
+| `FRP_LOCAL_IP` | 否 | `127.0.0.1` | frpc 转发到的本地地址；建议保持默认 |
+| `FRP_LOCAL_PORT` | 否 | `8083` | frpc 转发到的本地端口 |
+| `FRP_AUTO_START` | 否 | `1` | 设为 `0` 时禁止 `npm start` 自动启动 frp |
+| `FRP_CONFIG_FILE` | 否 | `frp/conf/frpc.toml` 或 `frp/conf/frps.toml` | 生成/读取的 frp 配置路径 |
+| `FRP_EXTRA_TOML_FILE` | 否 | - | 追加原生 frp TOML 的本地文件路径 |
 | `CLAUDE_PATH` | 否 | `claude` | Claude CLI 可执行文件路径 |
 | `CODEX_PATH` | 否 | `codex` | Codex CLI 可执行文件路径 |
 | `CC_WEB_CONFIG_DIR` | 否 | `./config` | 配置目录覆写（主要供隔离测试使用） |
@@ -139,7 +166,10 @@ cc-web/
 ├── server.js              # Node.js 后端（HTTP + WebSocket + 进程管理 + 通知）
 ├── lib/
 │   ├── agent-runtime.js    # Claude / Codex 运行时适配层
-│   └── codex-rollouts.js   # Codex rollout 历史解析
+│   ├── codex-rollouts.js   # Codex rollout 历史解析
+│   ├── frp-config.js       # 内置 frp 配置生成
+│   └── frp-manager.js      # 内置 frp 进程管理
+├── frp/                    # frp 运行目录（bin/conf/logs/run 均为本地生成并忽略）
 ├── public/
 │   ├── index.html          # 页面结构
 │   ├── app.js              # 前端逻辑（WebSocket 通信、UI 交互）
@@ -154,7 +184,10 @@ cc-web/
 ├── scripts/
 │   ├── regression.js       # 隔离式回归脚本
 │   ├── mock-claude.js      # 回归用 mock Claude CLI
-│   └── mock-codex.js       # 回归用 mock Codex CLI
+│   ├── mock-codex.js       # 回归用 mock Codex CLI
+│   ├── frp-download.js     # 官方 frp Release 下载与 SHA256 校验
+│   ├── frp-setup.js        # 生成本地 frp/conf/*.toml
+│   └── frp-control.js      # frp start/stop/status 管理命令
 ├── .env.example            # 环境变量模板
 ├── start.bat               # Windows 一键启动脚本
 ├── .gitignore

@@ -10,14 +10,36 @@
 
 默认不要把 cc-web 改成公网监听。frpc 只转发到内网机器的 `127.0.0.1:8083`。
 
+## 内置 frp 快速方式
+本仓库提供内置 frp 下载、配置生成和进程管理脚本：
+
+```bash
+npm run frp:download
+npm run frp:setup
+npm run frp:start
+npm run frp:status
+```
+
+生成文件位置：
+- `frp/bin/`：官方 Release 下载并 SHA256 校验后的 `frpc`/`frps`
+- `frp/conf/`：本地生成的 `frpc.toml`/`frps.toml`，可能包含真实 token
+- `frp/logs/`：frp 日志
+- `frp/run/`：pid 文件
+
+这些路径均已被 `.gitignore` 忽略。不要把 `frp/conf/*.toml` 复制到仓库提交区。
+
 ## 公网机器
-1. 安装 `frps`。
-2. 复制 `deploy/frp/frps.example.toml` 到你的运行目录。
-3. 替换 `YOUR_FRP_TOKEN` 为强 token。
-4. 按你的运行方式启动 `frps`。
-5. 配置防火墙，仅放行 frp 入口端口和必要的 HTTP/HTTPS 入口。
-6. 可选：开启 HTTP 域名模式时，替换 `YOUR_DOMAIN` 并只开放受控入口。
-7. 可选：使用 Nginx/Caddy 在公网入口做 HTTPS 反代。
+1. 克隆仓库并运行 `npm install`。
+2. 复制 `.env.example` 为 `.env`。
+3. 设置 `FRP_MODE=server`、`FRP_BIND_PORT=7000` 和强 `FRP_TOKEN`。
+4. 如使用域名模式，设置 `FRP_VHOST_HTTP_PORT`。
+5. 运行 `npm run frp:download`，脚本会从官方 GitHub Release 下载并校验 SHA256。
+6. 运行 `npm run frp:setup` 生成 `frp/conf/frps.toml`。
+7. 运行 `npm run frp:start` 启动 `frps`，或用 `npm start` 同时托管 cc-web 与 frp。
+8. 配置防火墙，仅放行 frp 入口端口和必要的 HTTP/HTTPS 入口。
+9. 可选：使用 Nginx/Caddy 在公网入口做 HTTPS 反代。
+
+仍可使用原生 frp 方式：复制 `deploy/frp/frps.example.toml` 到你的运行目录，替换 `YOUR_FRP_TOKEN` 后按官方 frp 方式启动。示例文件只作为安全模板，不包含真实 token。
 
 公网机安全检查：
 
@@ -28,15 +50,19 @@ bash scripts/frp/check-frp-config.sh deploy/frp/frps.example.toml
 不要默认开启 frps dashboard。如果确实需要 dashboard，必须放到受限网络后面，并使用强认证。
 
 ## 内网机器
-1. 启动 `cc-web-enhance`。
+1. 启动或准备启动 `cc-web-enhance`。
 2. 确认它只监听 `127.0.0.1:8083`。
-3. 安装 `frpc`。
-4. 复制 `deploy/frp/frpc.example.toml` 到你的运行目录。
-5. 替换 `YOUR_FRP_SERVER_IP` 和 `YOUR_FRP_TOKEN`。
-6. 如使用 TCP 模式，替换 `YOUR_PUBLIC_PORT`。
-7. 如使用 HTTP 域名模式，替换 `YOUR_DOMAIN` 并启用对应 proxy 配置。
-8. 启动 `frpc`。
-9. 从外部访问公网入口。
+3. 复制 `.env.example` 为 `.env`。
+4. 设置 `FRP_MODE=client`、`FRP_SERVER_ADDR=YOUR_FRP_SERVER_IP`、`FRP_SERVER_PORT=7000` 和强 `FRP_TOKEN`。
+5. 公网 IP 端口模式设置 `FRP_TYPE=ip` 和 `FRP_PUBLIC_PORT=YOUR_PUBLIC_PORT`。
+6. 域名模式设置 `FRP_TYPE=domain`，并设置 `FRP_CUSTOM_DOMAIN=YOUR_DOMAIN` 或 `FRP_SUBDOMAIN`。
+7. 保持 `FRP_LOCAL_IP=127.0.0.1` 和 `FRP_LOCAL_PORT=8083`。
+8. 运行 `npm run frp:download`。
+9. 运行 `npm run frp:setup` 生成 `frp/conf/frpc.toml`。
+10. 运行 `npm start`，服务会在 `FRP_MODE=client` 时自动拉起 `frpc`；也可以用 `npm run frp:start` 单独启动。
+11. 从外部访问公网入口。
+
+仍可使用原生 frp 方式：复制 `deploy/frp/frpc.example.toml` 到你的运行目录，替换 `YOUR_FRP_SERVER_IP`、`YOUR_FRP_TOKEN`、`YOUR_PUBLIC_PORT` 或 `YOUR_DOMAIN` 后按官方 frp 方式启动。
 
 内网机安全检查：
 

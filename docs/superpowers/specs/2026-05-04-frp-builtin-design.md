@@ -43,7 +43,7 @@ Supported variables:
 - `FRP_BIND_PORT`: server mode bind port, default `7000`
 - `FRP_VHOST_HTTP_PORT`: optional server domain-mode HTTP vhost port
 - `FRP_CONFIG_FILE`: optional override path
-- `FRP_AUTO_START`: `1` to allow `server.js` auto-start; default disabled unless config file already exists and mode is not disabled.
+- `FRP_AUTO_START`: set to `0` to prevent `server.js` from starting frp. When `FRP_MODE` is `client` or `server`, auto-start is otherwise allowed.
 
 No generated config in this branch contains a real token unless the user passes one through local environment. Committed templates use placeholders only.
 
@@ -69,16 +69,18 @@ SHA256 mismatch is a hard failure.
 
 ## Process Management
 `lib/frp-manager.js` starts either `frpc` or `frps` based on resolved config:
-- no detached child process
+- `server.js` starts a non-detached child process so shutdown can clean it
+- `npm run frp:start` starts a detached managed process with pid-file tracking
 - stdout/stderr append to `frp/logs/<name>.log`
 - pid recorded under `frp/run/`
 - no automatic restart by default
 - stop hooks on `SIGINT` and `SIGTERM`
 
 `server.js` starts frp before `server.listen()` only when the internal gate allows auto-start:
-- `FRP_MODE` is not `disabled`
-- config path exists or local env clearly enables frp
-- binary exists
+- `FRP_AUTO_START` is not `0`
+- `FRP_MODE` resolves to `client` or `server`
+- binary and generated config exist
+- generated config no longer contains `YOUR_*` placeholders
 
 If the binary is missing, cc-web remains available and logs an actionable message instead of downloading implicitly during startup.
 

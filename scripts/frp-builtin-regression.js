@@ -51,6 +51,29 @@ function checkPackageScripts() {
   assert(pkg.scripts['frp:status'] === 'node scripts/frp-control.js status', 'package should expose frp:status');
 }
 
+function checkUserDocs() {
+  const envExample = read('.env.example');
+  for (const required of [
+    'FRP_MODE=client',
+    'FRP_TYPE=ip',
+    'FRP_SERVER_ADDR=YOUR_FRP_SERVER_IP',
+    'FRP_TOKEN=YOUR_FRP_TOKEN',
+    'FRP_LOCAL_IP=127.0.0.1',
+    'FRP_LOCAL_PORT=8083',
+  ]) {
+    assert(envExample.includes(required), `.env.example should document ${required}`);
+  }
+
+  const readme = read('README.md');
+  for (const required of ['npm run frp:download', 'npm run frp:setup', 'npm run frp:start', 'frp/bin/']) {
+    assert(readme.includes(required), `README should document built-in frp flow: ${required}`);
+  }
+
+  const design = read('docs/intranet-access-design.md');
+  assert(design.includes('内置 frp 运行方式'), 'design doc should describe built-in frp behavior');
+  assert(design.includes('FRP_MODE=client'), 'design doc should mention client mode');
+}
+
 function checkConfigRendering() {
   const ip = frpConfig.resolveFrpConfig({
     FRP_MODE: 'client',
@@ -118,6 +141,7 @@ function checkManagerHelpers() {
 checkDownloadHelpers();
 checkGitignore();
 checkPackageScripts();
+checkUserDocs();
 checkConfigRendering();
 checkManagerHelpers();
 

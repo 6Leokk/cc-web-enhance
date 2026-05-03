@@ -80,6 +80,18 @@ After startup, open `http://127.0.0.1:8083` and sign in with your password.
 
 The service still listens only on `127.0.0.1:8083` by default. For safe public access to an intranet machine, use frp to forward the public entry to the local cc-web address instead of changing cc-web to a public bind by default.
 
+This branch includes frp download, config generation, and process management, so you do not need to download frp manually:
+
+```bash
+cp .env.example .env
+# Edit .env: set FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_TOKEN, and choose FRP_TYPE=ip or domain
+npm run frp:download
+npm run frp:setup
+npm start
+```
+
+When `FRP_MODE=client` or `FRP_MODE=server`, `npm start` automatically starts the matching `frpc` or `frps` process. You can also manage it directly with `npm run frp:start`, `npm run frp:stop`, and `npm run frp:status`. Generated binaries, config, logs, and pid files live under `frp/`; `frp/bin/`, `frp/conf/`, `frp/logs/`, and `frp/run/` are ignored by git.
+
 See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design](./docs/intranet-access-design.md) for architecture and alternatives.
 
 ## Configuration
@@ -93,6 +105,21 @@ See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design
 | `CC_WEB_HOST` | No | `127.0.0.1` | Bind address; keep default for frp mode |
 | `PORT` | No | - | Legacy alias; `CC_WEB_PORT` takes priority |
 | `HOST` | No | - | Legacy alias; `CC_WEB_HOST` takes priority |
+| `FRP_MODE` | No | `disabled` | Built-in frp mode: `disabled` / `client` / `server` |
+| `FRP_TYPE` | No | `ip` | Client tunnel type: public IP/port `ip`, or HTTP domain `domain` |
+| `FRP_SERVER_ADDR` | Required for client | `YOUR_FRP_SERVER_IP` | Public frps address placeholder to replace locally |
+| `FRP_SERVER_PORT` | No | `7000` | frps connection port |
+| `FRP_TOKEN` | Required when frp is enabled | `YOUR_FRP_TOKEN` | Strong frp token; keep it only in local `.env` |
+| `FRP_PUBLIC_PORT` | Required for `FRP_TYPE=ip` | `YOUR_PUBLIC_PORT` | Public TCP access port |
+| `FRP_CUSTOM_DOMAIN` | Optional for `FRP_TYPE=domain` | `YOUR_DOMAIN` | Full domain for HTTP domain mode |
+| `FRP_SUBDOMAIN` | No | - | frp subdomain for HTTP domain mode |
+| `FRP_BIND_PORT` | Optional for server mode | `7000` | frps bindPort |
+| `FRP_VHOST_HTTP_PORT` | Optional for server domain mode | - | frps HTTP vhost port |
+| `FRP_LOCAL_IP` | No | `127.0.0.1` | Local address forwarded by frpc; keep the default for cc-web |
+| `FRP_LOCAL_PORT` | No | `8083` | Local cc-web port forwarded by frpc |
+| `FRP_AUTO_START` | No | `1` | Set `0` to prevent `npm start` from starting frp |
+| `FRP_CONFIG_FILE` | No | `frp/conf/frpc.toml` or `frp/conf/frps.toml` | frp config path to generate/read |
+| `FRP_EXTRA_TOML_FILE` | No | - | Local file containing native frp TOML to append |
 | `CLAUDE_PATH` | No | `claude` | Executable path to Claude CLI |
 | `CODEX_PATH` | No | `codex` | Executable path to Codex CLI |
 | `PUSHPLUS_TOKEN` | No | - | PushPlus token (migrated into notification config on first start) |
@@ -138,7 +165,10 @@ cc-web/
 ├── server.js              # Node.js backend (HTTP + WebSocket + process management + notifications)
 ├── lib/
 │   ├── agent-runtime.js    # Claude / Codex runtime adapter
-│   └── codex-rollouts.js   # Codex rollout history parser
+│   ├── codex-rollouts.js   # Codex rollout history parser
+│   ├── frp-config.js       # Built-in frp config generation
+│   └── frp-manager.js      # Built-in frp process management
+├── frp/                    # frp runtime directory (bin/conf/logs/run are generated and ignored)
 ├── public/
 │   ├── index.html          # UI structure
 │   ├── app.js              # Frontend logic (WebSocket, UI interactions)
@@ -150,8 +180,7 @@ cc-web/
 │   └── auth.json           # Auth config (generated at runtime)
 ├── sessions/               # Chat history JSON files (generated at runtime)
 ├── logs/                   # Process lifecycle logs (generated at runtime)
-├── lib/                    # Agent runtime + Codex rollout parsing helpers
-├── scripts/                # Regression tooling + mock CLIs
+├── scripts/                # Regression tooling, mock CLIs, and frp helper commands
 ├── .env.example            # Environment variable template
 ├── start.bat               # Windows startup script
 ├── .gitignore

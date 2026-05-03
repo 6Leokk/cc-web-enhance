@@ -17,7 +17,8 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 | Stage 1 binary gate | PASS | `npm run frp:download` downloaded official `v0.68.1`, verified SHA256, installed `frpc` and `frps` |
 | Stage 2 config gate | PASS | `lib/frp-config.js` renders client/ip, client/domain, server config; `npm run frp:setup` wrote ignored config |
 | Stage 3 process gate | PASS | `lib/frp-manager.js` and `scripts/frp-control.js` manage start/stop/status; server integration test confirmed SIGTERM cleans the child frp process |
-| Final reviewer gate | Pending | Not reached |
+| Stage 4 docs gate | PASS | `.env.example`, README, deployment docs, and design docs describe built-in frp flow |
+| Final reviewer gate | Pending | Full verification not yet complete |
 
 ## Completed
 - Verified git baseline and pushed current HEAD.
@@ -46,12 +47,22 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 - Ran `node --check lib/frp-manager.js scripts/frp-control.js server.js scripts/frp-builtin-regression.js`: passed.
 - Ran Stage 3 frps control verification with a generated ignored config: start/status/stop succeeded, frps bound only `127.0.0.1:<random-port>`, and no process remained after stop.
 - Ran server integration cleanup verification: `server.js` started managed frps and SIGTERM cleaned the frps child process.
+- Updated `.env.example` with commented `FRP_*` placeholders and safe local defaults.
+- Updated `README.md` and `README.en.md` with the built-in frp quick flow, npm scripts, env variables, and runtime paths.
+- Updated `docs/intranet-access-design.md` with the built-in frp runtime model.
+- Updated `docs/deploy-frp.md` so both公网 `frps` and内网 `frpc` can be managed through this repo's built-in scripts.
+- Updated the design spec to match actual auto-start and detached CLI behavior.
+- Extended `scripts/frp-builtin-regression.js` to cover the built-in frp docs and `.env.example`.
+- Ran `node scripts/frp-builtin-regression.js`: passed.
+- Ran `node --check scripts/frp-builtin-regression.js scripts/frp-download.js scripts/frp-setup.js scripts/frp-control.js lib/frp-config.js lib/frp-manager.js server.js`: passed.
+- Ran `git diff --check`: passed.
 
 ## Next Step
-Commit Stage 3, then update the user-facing built-in frp docs, `.env.example`, and final verification record.
+Commit Stage 4, then run final regression, syntax, shell, security, git, and process-cleanup checks.
 
 ## Checkpoint Commits
 - `fb3c0fe` docs: record frp push status
 - `1a4d7fe` docs: design built-in frp support
 - `f772170` feat: add frp binary downloader
 - `429c556` feat: generate built-in frp config
+- `835546b` feat: manage built-in frp process
