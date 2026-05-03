@@ -4,7 +4,7 @@
 Add safe intranet remote access support for `cc-web-enhance` with frp-first deployment docs, secure host/port defaults, regression coverage, and branch audit records, then commit and push the branch.
 
 ## Current Phase
-Phase 4
+Phase 5
 
 ## Phases
 
@@ -27,15 +27,15 @@ Phase 4
 - **Status:** complete
 
 ### Phase 4: Verification
-- [ ] Run regression, node syntax checks, bash syntax checks, and grep-based safety scans
-- [ ] Fix failures and record results
-- **Status:** pending
+- [x] Run regression, node syntax checks, bash syntax checks, and grep-based safety scans
+- [x] Fix failures and record results
+- **Status:** complete
 
 ### Phase 5: Commit, review, and delivery
-- [ ] Record branch progress and security review
+- [x] Record branch progress and security review
 - [ ] Commit staged changes in logical chunks
 - [ ] Push `feature/intranet-access-frp-safe` to origin
-- **Status:** pending
+- **Status:** in_progress
 
 ## Key Questions
 1. Can the repo keep backward compatibility with `HOST` / `PORT` while adding `CC_WEB_HOST` / `CC_WEB_PORT`?

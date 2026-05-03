@@ -20,7 +20,7 @@
 - [x] **Step 2: Run test to verify it fails**
 - [x] **Step 3: Write minimal implementation**
 - [x] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ### Task 2: Implement bind resolution
 
@@ -32,7 +32,7 @@
 - [x] **Step 2: Run test to verify it fails**
 - [x] **Step 3: Write minimal implementation**
 - [x] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ### Task 3: Add frp deployment assets
 
@@ -48,7 +48,7 @@
 - [x] **Step 2: Run test to verify it fails**
 - [x] **Step 3: Write minimal implementation**
 - [x] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ### Task 4: Update docs and README
 
@@ -63,7 +63,7 @@
 - [x] **Step 2: Run test to verify it fails**
 - [x] **Step 3: Write minimal implementation**
 - [x] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ### Task 5: Verification and release prep
 
@@ -73,7 +73,7 @@
 - Modify: `findings.md`
 - Modify: `task_plan.md`
 
-- [ ] **Step 1: Run regression and syntax checks**
-- [ ] **Step 2: Run grep-based security scans**
-- [ ] **Step 3: Record results and residual risks**
+- [x] **Step 1: Run regression and syntax checks**
+- [x] **Step 2: Run grep-based security scans**
+- [x] **Step 3: Record results and residual risks**
 - [ ] **Step 4: Commit**

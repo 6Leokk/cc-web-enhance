@@ -4,7 +4,7 @@
 Deliver a safe frp-first intranet remote access path for `cc-web-enhance`, with docs, scripts, tests, and staged commits, while preserving the default local-only bind.
 
 ## Current Phase
-Phase 3: implementation complete, broader verification pending
+Phase 4: verification complete, pre-push review pending
 
 ## Completed
 - Checked repository status, branch, and remotes
@@ -18,9 +18,10 @@ Phase 3: implementation complete, broader verification pending
 - Added `CC_WEB_HOST` / `CC_WEB_PORT` parsing with legacy `HOST` / `PORT` fallback
 - Added placeholder-only frp configs and local-only helper scripts
 - Updated README and `.env.example` to document `127.0.0.1:8083`
+- Ran full regression and security-focused supplemental regressions
+- Completed post-implementation static security review
 
 ## Pending
-- Run regression and security scans
 - Commit stage-by-stage and push
 
 ## Key Design Decisions
@@ -50,6 +51,17 @@ Phase 3: implementation complete, broader verification pending
 | `node --check server.js lib/server-config.js scripts/intranet-frp-safety-regression.js` | PASS | Syntax checks passed |
 | `bash -n scripts/frp/*.sh` | PASS | Shell syntax checks passed |
 | `bash scripts/frp/check-frp-config.sh deploy/frp/*.toml` | PASS | Example frp configs passed safety script |
+| `npm run regression` | PASS | Full regression chain passed, including new intranet frp safety regression |
+| `npm run regression:notify` | PASS | Local capture server only; no public Bark endpoint |
+| `npm run regression:notify-foreground` | PASS | Local capture server only |
+| `npm run regression:auth-ip` | PASS | Forwarded-IP trust remains gated |
+| `npm run regression:port-safety` | PASS | Port killing remains explicitly gated |
+| `git ls-files '*.js' ':!:public/vendor/*' \| xargs -r -n 1 node --check` | PASS | All tracked relevant JS syntax checks passed |
+| `curl -sS --max-time 3 -I http://127.0.0.1:8083/` | PASS | HTTP 200 headers returned; read-only request only |
+| `/tmp` Codex auth/config copy scan | PASS | Count `0` for `.codex/auth.json` and `.codex/config.toml` under `/tmp` |
+| dangerous command grep | PASS | No `rm -rf`, `git reset --hard`, `git clean -fd`, or `chmod 777` in tracked files |
+| `0.0.0.0` grep | REVIEWED | Findings are warnings/tests/historical docs or existing server explicit-bind handling; no default bind |
+| `token/password/secret` grep | REVIEWED | Findings are existing auth logic, fixtures, docs, and frp placeholders; no real secret identified |
 
 ## Superpower Usage
 - `superpowers:using-superpowers` used to start the session
@@ -59,13 +71,15 @@ Phase 3: implementation complete, broader verification pending
 - `superpowers:test-driven-development` loaded for test-first implementation
 - `superpowers:requesting-code-review` loaded for implementation completeness review
 - Implementation completeness review result: manual fallback used because code-reviewer subagent dispatch is not allowed without explicit user delegation in current tool policy. Manual review checked bind defaults, env priority, no token logging, frp placeholder-only examples, no dashboard default, local-only scripts, and README/env alignment.
+- `superpowers:verification-before-completion` loaded for post-test security review.
 - Spec reviewer subagent not used yet; will fall back to manual review if tool policy prevents delegation
 
 ## Commit History
 - `c87369c` docs: add intranet access design
+- `6872e6c` feat: add safe frp access support
 
 ## Final Push Status
 - Not pushed yet
 
 ## Next Step
-Run full regression and security scans, then record security review and push after clean status.
+Commit this security review record, then run final pre-push review and push after clean status.

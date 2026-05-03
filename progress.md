@@ -54,6 +54,20 @@
   - `README.md`
   - `README.en.md`
 
+### Phase 4: Testing and security review
+- **Status:** complete
+- Actions taken:
+  - Ran full regression chain
+  - Ran notification, foreground notification, auth IP, and port-safety regressions
+  - Ran JS syntax checks across tracked non-vendor JS files
+  - Ran bash syntax checks for frp helper scripts
+  - Ran dangerous command and sensitive-keyword grep scans
+  - Ran read-only HTTP check against `http://127.0.0.1:8083/`
+  - Verified `/tmp` contains zero `.codex/auth.json` or `.codex/config.toml` copies in accessible paths
+- Files created/modified:
+  - `docs/security/intranet-access-security-review.md`
+  - `docs/branch-progress/intranet-access-frp-safe.md`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
@@ -66,6 +80,13 @@
 | JS syntax | `node --check server.js && node --check lib/server-config.js && node --check scripts/intranet-frp-safety-regression.js` | pass | passed | ✓ |
 | shell syntax | `bash -n scripts/frp/check-frp-config.sh scripts/frp/check-local-cc-web.sh` | pass | passed | ✓ |
 | frp script | `bash scripts/frp/check-frp-config.sh deploy/frp/frps.example.toml deploy/frp/frpc.example.toml` | pass | passed | ✓ |
+| full regression | `npm run regression` | pass | passed | ✓ |
+| notify regression | `npm run regression:notify` | pass | passed | ✓ |
+| notify foreground regression | `npm run regression:notify-foreground` | pass | passed | ✓ |
+| auth IP regression | `npm run regression:auth-ip` | pass | passed | ✓ |
+| port safety regression | `npm run regression:port-safety` | pass | passed | ✓ |
+| local HTTP check | `curl -sS --max-time 3 -I http://127.0.0.1:8083/` | HTTP headers | HTTP 200 | ✓ |
+| tmp Codex copy scan | `find /tmp ... | wc -l` | 0 | 0 | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
@@ -75,8 +96,8 @@
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 4 |
-| Where am I going? | Full regression, security scans, final review, push |
+| Where am I? | Phase 5 |
+| Where am I going? | Final review, commit security record, push |
 | What's the goal? | Safe frp intranet access for cc-web-enhance |
 | What have I learned? | See findings.md |
-| What have I done? | Repo discovery, docs, TDD regression, bind config, frp examples, helper scripts |
+| What have I done? | Repo discovery, docs, TDD regression, bind config, frp examples, helper scripts, full verification |
