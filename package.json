@@ -31,7 +31,8 @@
     "regression:ui": "node scripts/ui-regression.js",
     "regression:session-navigation": "node scripts/session-navigation-state-regression.js",
     "regression:frp-builtin": "node scripts/frp-builtin-regression.js",
-    "frp:download": "node scripts/frp-download.js"
+    "frp:download": "node scripts/frp-download.js",
+    "frp:setup": "node scripts/frp-setup.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
