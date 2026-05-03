@@ -4,7 +4,7 @@
 Deliver a safe frp-first intranet remote access path for `cc-web-enhance`, with docs, scripts, tests, and staged commits, while preserving the default local-only bind.
 
 ## Current Phase
-Built-in frp continuation verified; final review record commit and push pending
+Complete: built-in frp continuation pushed to origin
 
 ## Completed
 - Checked repository status, branch, and remotes
@@ -32,7 +32,7 @@ Built-in frp continuation verified; final review record commit and push pending
 - Archived superseded root planning files to `archive/old/2026-05-04-intranet-frp-initial/` rather than deleting them
 
 ## Pending
-- Final built-in frp checkpoint commit and push
+- None
 
 ## Key Design Decisions
 | Decision | Rationale |
@@ -117,11 +117,15 @@ Built-in frp continuation verified; final review record commit and push pending
 - `835546b` feat: manage built-in frp process
 - `6912fcf` docs: explain built-in frp workflow
 - `d5eb1a0` docs: archive superseded intranet frp notes
+- `91f9a18` docs: record built-in frp final review
 
 ## Final Push Status
 - Pushed to `origin feature/intranet-access-frp-safe`.
 - Remote verification after first push showed `ce024ced005df7e1d058e5958589e48c83f088a2` at `refs/heads/feature/intranet-access-frp-safe`.
 - This push-status doc update is committed after that verification and pushed as the final branch update; exact final HEAD is reported in the final response.
+- Built-in frp continuation push: `git push origin feature/intranet-access-frp-safe` updated remote from `fb3c0fe` to `91f9a18`.
+- Remote verification after built-in frp push showed `91f9a18949a1cf8693888d809e53447da7f18935` at `refs/heads/feature/intranet-access-frp-safe`.
+- This final built-in push-status doc update is committed after that verification and will be pushed as the final branch update.
 
 ## Next Step
 Open a pull request or review the pushed branch on GitHub.

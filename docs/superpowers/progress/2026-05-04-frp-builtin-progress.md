@@ -66,9 +66,10 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 - Ran final `ps -ef | grep -E 'frpc|frps' | grep -v grep || true`: no lingering frp process.
 - Ran tracked-only dangerous command and secret-shaped scans: no executable dangerous-command hits and no common real secret-shaped hits.
 - Manual reviewer gate completed because subagent code review is not available without explicit subagent delegation. No blocking issues found.
+- Pushed `feature/intranet-access-frp-safe`; remote verification showed `91f9a18949a1cf8693888d809e53447da7f18935` at `refs/heads/feature/intranet-access-frp-safe`.
 
 ## Next Step
-Commit final review records, then push `feature/intranet-access-frp-safe` to origin and verify the remote ref.
+Push this final push-status doc update and report results.
 
 ## Checkpoint Commits
 - `fb3c0fe` docs: record frp push status
@@ -78,3 +79,4 @@ Commit final review records, then push `feature/intranet-access-frp-safe` to ori
 - `835546b` feat: manage built-in frp process
 - `6912fcf` docs: explain built-in frp workflow
 - `d5eb1a0` docs: archive superseded intranet frp notes
+- `91f9a18` docs: record built-in frp final review
