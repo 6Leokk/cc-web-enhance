@@ -153,9 +153,11 @@ async function main() {
   const configDir = path.join(tempRoot, 'config');
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
+  const homeDir = path.join(tempRoot, 'home');
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
+  mkdirp(homeDir);
 
   const port = await getFreePort();
   const password = 'Notify!234';
@@ -167,6 +169,8 @@ async function main() {
       CC_WEB_CONFIG_DIR: configDir,
       CC_WEB_SESSIONS_DIR: sessionsDir,
       CC_WEB_LOGS_DIR: logsDir,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
     }, async () => {
       const { ws, messages } = await connectWs(port, password);
       await nextMessage(messages, ws, (msg) => msg.type === 'session_list');
@@ -188,7 +192,7 @@ async function main() {
             enabled: true,
             trigger: 'always',
             apiSource: 'custom',
-            apiBase: 'https://summary.example.com',
+            apiBase: baseUrl,
             apiKey: 'sk-summary-regression',
             model: 'summary-model',
           },
@@ -258,6 +262,8 @@ async function main() {
     CC_WEB_CONFIG_DIR: envConfigDir,
     CC_WEB_SESSIONS_DIR: envSessionsDir,
     CC_WEB_LOGS_DIR: envLogsDir,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
     BARK_SERVER_URL: 'https://env-bark.example.com',
     BARK_DEVICE_KEY: 'env-bark-key',
     BARK_GROUP: 'Env Group',
@@ -285,15 +291,17 @@ async function main() {
   mkdirp(hostLogsDir);
   const hostPort = await getFreePort();
   await withServer({
-    HOST: '0.0.0.0',
+    HOST: '127.0.0.1',
     PORT: String(hostPort),
     CC_WEB_PASSWORD: password,
     CC_WEB_CONFIG_DIR: hostConfigDir,
     CC_WEB_SESSIONS_DIR: hostSessionsDir,
     CC_WEB_LOGS_DIR: hostLogsDir,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
   }, async ({ stdout }) => {
-    assert(stdout().includes(`CC-Web server listening on 0.0.0.0:${hostPort}`), 'HOST env should control bind address');
-    assert(/LAN access: http:\/\/\d+\.\d+\.\d+\.\d+:\d+/.test(stdout()), 'HOST=0.0.0.0 should print dynamic LAN access URLs');
+    assert(stdout().includes(`CC-Web server listening on 127.0.0.1:${hostPort}`), 'HOST env should control bind address');
+    assert(!/LAN access: http:\/\//.test(stdout()), 'HOST=127.0.0.1 should not print LAN access URLs');
   });
 
   console.log('Notify regression checks passed.');

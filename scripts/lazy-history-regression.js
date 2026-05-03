@@ -161,9 +161,11 @@ async function main() {
   const configDir = path.join(tempRoot, 'config');
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
+  const homeDir = path.join(tempRoot, 'home');
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
+  mkdirp(homeDir);
 
   fs.writeFileSync(path.join(configDir, 'notify.json'), JSON.stringify({
     provider: 'off',
@@ -183,6 +185,8 @@ async function main() {
     CC_WEB_CONFIG_DIR: configDir,
     CC_WEB_SESSIONS_DIR: sessionsDir,
     CC_WEB_LOGS_DIR: logsDir,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
   }, async () => {
     const client = await connectWs(port, password);
     await nextMessage(client.messages, client.ws, (msg) => msg.type === 'session_list');

@@ -212,10 +212,12 @@ async function main() {
   const configDir = path.join(tempRoot, 'config');
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
+  const homeDir = path.join(tempRoot, 'home');
   const slowMockPath = path.join(tempRoot, 'mock-codex-slow.js');
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
+  mkdirp(homeDir);
   writeSlowMockCodex(slowMockPath);
 
   const sessionId = 'foreground-refresh-session';
@@ -233,6 +235,8 @@ async function main() {
     CC_WEB_CONFIG_DIR: configDir,
     CC_WEB_SESSIONS_DIR: sessionsDir,
     CC_WEB_LOGS_DIR: logsDir,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
     CODEX_PATH: slowMockPath,
   }, async () => {
     const client = await connectWs(port, password);

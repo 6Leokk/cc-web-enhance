@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
+const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 const WebSocket = require('ws');
 
@@ -85,6 +86,32 @@ async function withServer(env, fn) {
     await sleep(300);
     if (!child.killed) child.kill('SIGKILL');
   }
+}
+
+function startCaptureServer() {
+  return new Promise((resolve, reject) => {
+    const requests = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk.toString(); });
+      req.on('end', () => {
+        requests.push({ method: req.method, url: req.url, headers: req.headers, body });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 200, message: 'success' }));
+      });
+    });
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve({ server, baseUrl: `http://127.0.0.1:${addr.port}`, requests });
+    });
+  });
+}
+
+function closeCaptureServer(server) {
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+  });
 }
 
 function connectWs(port, password) {
@@ -302,6 +329,7 @@ async function main() {
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
   const homeDir = path.join(tempRoot, 'home');
+  const captureServer = await startCaptureServer();
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
@@ -315,7 +343,7 @@ async function main() {
     feishu: { webhook: '' },
     qqbot: { qmsgKey: '' },
     bark: {
-      serverUrl: 'https://api.day.app',
+      serverUrl: captureServer.baseUrl,
       deviceKey: '',
       group: 'CC-Web',
       sound: '',
@@ -331,6 +359,7 @@ async function main() {
   const port = await getFreePort();
   const password = 'Regression!234';
 
+  try {
   await withServer({
     PORT: String(port),
     CC_WEB_PASSWORD: password,
@@ -338,6 +367,7 @@ async function main() {
     CC_WEB_SESSIONS_DIR: sessionsDir,
     CC_WEB_LOGS_DIR: logsDir,
     HOME: homeDir,
+    USERPROFILE: homeDir,
     CLAUDE_PATH: MOCK_CLAUDE,
     CODEX_PATH: MOCK_CODEX,
   }, async () => {
@@ -350,7 +380,7 @@ async function main() {
       config: {
         provider: 'bark',
         bark: {
-          serverUrl: 'https://api.day.app',
+          serverUrl: captureServer.baseUrl,
           deviceKey: 'bark-regression-key',
           group: 'CC-Web Regression',
           sound: 'bell',
@@ -362,7 +392,7 @@ async function main() {
           enabled: true,
           trigger: 'always',
           apiSource: 'custom',
-          apiBase: 'https://summary.example.com',
+          apiBase: captureServer.baseUrl,
           apiKey: 'sk-summary-regression',
           model: 'summary-model',
         },
@@ -370,7 +400,7 @@ async function main() {
     }));
     const notifyConfigMsg = await nextMessage(messages, ws, (msg) => msg.type === 'notify_config');
     assert(notifyConfigMsg.config.provider === 'bark', 'Bark provider save/load failed');
-    assert(notifyConfigMsg.config.bark?.serverUrl === 'https://api.day.app', 'Bark server URL save/load failed');
+    assert(notifyConfigMsg.config.bark?.serverUrl === captureServer.baseUrl, 'Bark server URL save/load failed');
     assert(notifyConfigMsg.config.bark?.deviceKey.includes('****'), 'Bark device key should be masked');
     assert(notifyConfigMsg.config.bark?.group === 'CC-Web Regression', 'Bark group save/load failed');
     assert(notifyConfigMsg.config.bark?.sound === 'bell', 'Bark sound save/load failed');
@@ -591,6 +621,10 @@ async function main() {
     ws.close();
     console.log('Regression checks passed.');
   });
+  } finally {
+    await closeCaptureServer(captureServer.server);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 }
 
 main().catch((err) => {

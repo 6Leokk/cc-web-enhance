@@ -138,9 +138,11 @@ async function main() {
   const configDir = path.join(tempRoot, 'config');
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
+  const homeDir = path.join(tempRoot, 'home');
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
+  mkdirp(homeDir);
 
   const password = 'NotifyFg!234';
   const port = await getFreePort();
@@ -174,10 +176,13 @@ async function main() {
 
     await withServer({
       PORT: String(port),
+      HOST: '127.0.0.1',
       CC_WEB_PASSWORD: password,
       CC_WEB_CONFIG_DIR: configDir,
       CC_WEB_SESSIONS_DIR: sessionsDir,
       CC_WEB_LOGS_DIR: logsDir,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
       CODEX_PATH: MOCK_CODEX_PATH,
     }, async () => {
       const { ws, messages } = await connectWs(port, password);

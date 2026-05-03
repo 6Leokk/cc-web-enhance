@@ -124,9 +124,11 @@ async function main() {
   const configDir = path.join(tempRoot, 'config');
   const sessionsDir = path.join(tempRoot, 'sessions');
   const logsDir = path.join(tempRoot, 'logs');
+  const homeDir = path.join(tempRoot, 'home');
   mkdirp(configDir);
   mkdirp(sessionsDir);
   mkdirp(logsDir);
+  mkdirp(homeDir);
 
   fs.writeFileSync(path.join(configDir, 'notify.json'), JSON.stringify({
     provider: 'off',
@@ -136,7 +138,7 @@ async function main() {
     feishu: { webhook: '' },
     qqbot: { qmsgKey: '' },
     bark: {
-      serverUrl: 'https://api.day.app',
+      serverUrl: 'http://127.0.0.1',
       deviceKey: '',
       group: 'CC-Web',
       sound: '',
@@ -158,6 +160,8 @@ async function main() {
     CC_WEB_CONFIG_DIR: configDir,
     CC_WEB_SESSIONS_DIR: sessionsDir,
     CC_WEB_LOGS_DIR: logsDir,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
     CODEX_PATH: MOCK_CODEX_PATH,
   }, async () => {
     const primary = await connectWs(port, password);
