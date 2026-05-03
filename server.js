@@ -6,6 +6,7 @@ const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { resolveServerBindConfig } = require('./lib/server-config');
+const { startFrpFromEnv, stopFrpHandle } = require('./lib/frp-manager');
 const { createAgentRuntime } = require('./lib/agent-runtime');
 const { parseClaudeTranscriptLines } = require('./lib/claude-transcript');
 const { applyCodexParsedTelemetryToSession } = require('./lib/codex-telemetry');
@@ -4341,6 +4342,7 @@ setInterval(() => {
 plog('INFO', 'server_start', { port: PORT });
 
 let shuttingDown = false;
+let managedFrp = null;
 
 function shutdown(reason, exitCode = 0) {
   if (shuttingDown) return;
@@ -4359,6 +4361,15 @@ function shutdown(reason, exitCode = 0) {
       if (entry.codexRolloutTailer) entry.codexRolloutTailer.stop();
     }
   } catch {}
+
+  try {
+    if (managedFrp) {
+      stopFrpHandle(managedFrp);
+      managedFrp = null;
+    }
+  } catch (err) {
+    plog('WARN', 'frp_shutdown_error', { error: err.message });
+  }
 
   const forceTimer = setTimeout(() => {
     plog('WARN', 'server_shutdown_forced', { reason });
@@ -4498,6 +4509,18 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   plog('ERROR', 'unhandled_rejection', { error: reason?.stack || reason?.message || String(reason) });
 });
+
+try {
+  managedFrp = startFrpFromEnv(process.env, {
+    logger: (message) => {
+      plog('INFO', 'frp_manager', { message });
+      console.log(`[frp] ${message}`);
+    },
+  });
+} catch (err) {
+  plog('WARN', 'frp_auto_start_error', { error: err.message });
+  console.error(`[frp] auto-start failed: ${err.message}`);
+}
 
 server.listen(PORT, HOST, () => {
   ensureAuthLoaded();

@@ -6,6 +6,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const frpDownload = require('./frp-download');
 const frpConfig = require('../lib/frp-config');
+const frpManager = require('../lib/frp-manager');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -45,6 +46,9 @@ function checkPackageScripts() {
   const pkg = JSON.parse(read('package.json'));
   assert(pkg.scripts['frp:download'] === 'node scripts/frp-download.js', 'package should expose frp:download');
   assert(pkg.scripts['frp:setup'] === 'node scripts/frp-setup.js', 'package should expose frp:setup');
+  assert(pkg.scripts['frp:start'] === 'node scripts/frp-control.js start', 'package should expose frp:start');
+  assert(pkg.scripts['frp:stop'] === 'node scripts/frp-control.js stop', 'package should expose frp:stop');
+  assert(pkg.scripts['frp:status'] === 'node scripts/frp-control.js status', 'package should expose frp:status');
 }
 
 function checkConfigRendering() {
@@ -96,9 +100,25 @@ function checkConfigRendering() {
   assert(extraToml.includes('transport.tls.enable = true'), 'config should preserve native frp extra TOML');
 }
 
+function checkManagerHelpers() {
+  const config = frpConfig.resolveFrpConfig({
+    FRP_MODE: 'client',
+    FRP_TYPE: 'ip',
+  });
+  const runtime = frpManager.resolveFrpRuntime(config);
+  assert(runtime.binaryName === 'frpc', 'client mode should use frpc');
+  assert(runtime.logPath.endsWith(path.join('frp', 'logs', 'frpc.log')), 'client log path should be frpc.log');
+  assert(runtime.pidPath.endsWith(path.join('frp', 'run', 'frpc.pid')), 'client pid path should be frpc.pid');
+  assert(
+    frpManager.hasUnsafePlaceholders('auth.token = "YOUR_FRP_TOKEN"\n'),
+    'manager should detect generated placeholder tokens before start',
+  );
+}
+
 checkDownloadHelpers();
 checkGitignore();
 checkPackageScripts();
 checkConfigRendering();
+checkManagerHelpers();
 
 console.log('frp builtin regression checks passed');

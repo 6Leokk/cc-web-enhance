@@ -32,7 +32,10 @@
     "regression:session-navigation": "node scripts/session-navigation-state-regression.js",
     "regression:frp-builtin": "node scripts/frp-builtin-regression.js",
     "frp:download": "node scripts/frp-download.js",
-    "frp:setup": "node scripts/frp-setup.js"
+    "frp:setup": "node scripts/frp-setup.js",
+    "frp:start": "node scripts/frp-control.js start",
+    "frp:stop": "node scripts/frp-control.js stop",
+    "frp:status": "node scripts/frp-control.js status"
   },
   "dependencies": {
     "ws": "^8.18.0"

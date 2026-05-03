@@ -16,7 +16,7 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 | Plan gate | PASS | `docs/superpowers/plans/2026-05-04-frp-builtin-implementation.md` created and internally reviewed |
 | Stage 1 binary gate | PASS | `npm run frp:download` downloaded official `v0.68.1`, verified SHA256, installed `frpc` and `frps` |
 | Stage 2 config gate | PASS | `lib/frp-config.js` renders client/ip, client/domain, server config; `npm run frp:setup` wrote ignored config |
-| Stage 3 process gate | Pending | Not implemented yet |
+| Stage 3 process gate | PASS | `lib/frp-manager.js` and `scripts/frp-control.js` manage start/stop/status; server integration test confirmed SIGTERM cleans the child frp process |
 | Final reviewer gate | Pending | Not reached |
 
 ## Completed
@@ -39,11 +39,19 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 - Ran `node scripts/frp-builtin-regression.js`: passed.
 - Ran `npm run frp:setup`: generated `frp/conf/frpc.toml` with placeholders.
 - Verified `frp/conf/` is ignored and not tracked.
+- Added `lib/frp-manager.js` for runtime path resolution, placeholder refusal, pid-file tracking, managed process start/stop/status, and shutdown cleanup.
+- Added `scripts/frp-control.js` and npm scripts `frp:start`, `frp:stop`, and `frp:status`.
+- Integrated frp auto-start into `server.js` without changing the existing `CC_WEB_HOST`/`CC_WEB_PORT` listen path.
+- Ran `node scripts/frp-builtin-regression.js`: passed.
+- Ran `node --check lib/frp-manager.js scripts/frp-control.js server.js scripts/frp-builtin-regression.js`: passed.
+- Ran Stage 3 frps control verification with a generated ignored config: start/status/stop succeeded, frps bound only `127.0.0.1:<random-port>`, and no process remained after stop.
+- Ran server integration cleanup verification: `server.js` started managed frps and SIGTERM cleaned the frps child process.
 
 ## Next Step
-Commit Stage 2, then implement Stage 3 process manager, CLI control, and startup integration.
+Commit Stage 3, then update the user-facing built-in frp docs, `.env.example`, and final verification record.
 
 ## Checkpoint Commits
 - `fb3c0fe` docs: record frp push status
 - `1a4d7fe` docs: design built-in frp support
 - `f772170` feat: add frp binary downloader
+- `429c556` feat: generate built-in frp config
