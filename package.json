@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/codex-stream-refresh-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js && node scripts/intranet-frp-safety-regression.js",
+    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/codex-stream-refresh-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js && node scripts/intranet-frp-safety-regression.js && node scripts/frp-builtin-regression.js",
     "regression:assistant-mode": "node scripts/assistant-message-mode-regression.js",
     "regression:auth-ip": "node scripts/auth-ip-regression.js",
     "regression:codex-format": "node scripts/codex-message-format-regression.js",
@@ -29,7 +29,9 @@
     "regression:theme": "node scripts/theme-regression.js",
     "regression:mobile-scroll": "node scripts/mobile-scroll-regression.js",
     "regression:ui": "node scripts/ui-regression.js",
-    "regression:session-navigation": "node scripts/session-navigation-state-regression.js"
+    "regression:session-navigation": "node scripts/session-navigation-state-regression.js",
+    "regression:frp-builtin": "node scripts/frp-builtin-regression.js",
+    "frp:download": "node scripts/frp-download.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

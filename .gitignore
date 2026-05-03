@@ -21,3 +21,8 @@ id_dsa
 *.sqlite
 *.sqlite3
 .DS_Store
+frp/bin/*
+frp/conf/*
+frp/logs/*
+frp/run/*
+frp/tmp/*
