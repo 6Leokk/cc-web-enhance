@@ -29,6 +29,7 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 - Added `frp:start`, `frp:stop`, and `frp:status` process management
 - Integrated managed frp auto-start into `server.js` without changing `CC_WEB_HOST`/`CC_WEB_PORT`
 - Updated `.env.example`, README, deployment docs, and design docs for the built-in frp user flow
+- Archived superseded root planning files to `archive/old/2026-05-04-intranet-frp-initial/` rather than deleting them
 
 ## Pending
 - Final full regression and security scan
@@ -44,6 +45,7 @@ Built-in frp continuation in progress: Stage 4 docs completed, final verificatio
 | Download frp binaries at setup time instead of committing them | Keeps the repository free of binary artifacts while giving users a one-command path |
 | Store generated frp runtime data under ignored `frp/` paths | Prevents real local tokens/config/logs/pids from entering commits |
 | Preserve native frp features via appended TOML | Avoids narrowing frp capability while keeping cc-web's schema small |
+| Archive outdated root planning files | Keeps historical context without leaving stale first-pass notes at repo root |
 
 ## Security Boundaries
 - No live auth writes to the running `8083` service

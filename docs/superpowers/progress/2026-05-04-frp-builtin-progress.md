@@ -56,9 +56,10 @@ Build a foolproof built-in frp flow for `cc-web-enhance` on branch `feature/intr
 - Ran `node scripts/frp-builtin-regression.js`: passed.
 - Ran `node --check scripts/frp-builtin-regression.js scripts/frp-download.js scripts/frp-setup.js scripts/frp-control.js lib/frp-config.js lib/frp-manager.js server.js`: passed.
 - Ran `git diff --check`: passed.
+- Archived old root-level planning files (`findings.md`, `task_plan.md`, `progress.md`) to `archive/old/2026-05-04-intranet-frp-initial/` because their initial-discovery notes are superseded by `docs/superpowers/` and `docs/branch-progress/`.
 
 ## Next Step
-Commit Stage 4, then run final regression, syntax, shell, security, git, and process-cleanup checks.
+Commit the archive marker, then run final regression, syntax, shell, security, git, and process-cleanup checks.
 
 ## Checkpoint Commits
 - `fb3c0fe` docs: record frp push status
