@@ -1,17 +1,24 @@
-# CC-Web
+# CC-Web Enhance
 
-Claude Code / Codex 轻量级 Web 远程工具 — 在浏览器中与本机 CLI Agent 交互。
+Claude Code / Codex 轻量级 Web 远程工具增强版 — 在浏览器中与本机 CLI Agent 交互。
 
 ![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=node.js&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-blue)
+![License](https://img.shields.io/badge/License-See%20NOTICE-lightgrey)
 
-[English README](./README.en.md) | [更新日志](./CHANGELOG.md)
+[English README](./README.en.md) | [更新日志](./CHANGELOG.md) | [来源与许可说明](./NOTICE.md)
 
-Vibe产物，readme比较絮叨，建议直接丢给CC，拷打一番就好。
+本仓库是 [ZgDaniel/cc-web](https://github.com/ZgDaniel/cc-web) 的增强整理版本，目标是保留原项目轻量远程控制 Claude Code / Codex CLI 的使用方式，同时补强刷新性能、会话切换可靠性、Codex rollout 解析、静态资源交付和回归覆盖。
 
-## 一键部署：claude
+## 来源与许可
+
+- 上游项目：[`ZgDaniel/cc-web`](https://github.com/ZgDaniel/cc-web)
+- 增强版仓库：`cc-web-enhance`
+- 本仓库保留上游来源说明和致谢；详细说明见 [NOTICE.md](./NOTICE.md)。
+- 上游 README 显示 MIT badge，但 GitHub license metadata 当前未识别到上游 `LICENSE` 文件。本仓库不额外声明新的许可证；分发和二次开发前请确认并遵守上游最新许可声明。
+
+## 一键部署：Claude / Codex
 ```
-https://github.com/ZgDaniel/cc-web 给我装！
+https://github.com/6Leokk/cc-web-enhance 给我装！
 ```
 
 
@@ -30,6 +37,7 @@ https://github.com/ZgDaniel/cc-web 给我装！
 - **后台任务** — 关闭浏览器后 Claude 进程继续运行，完成后推送通知，支持 PushPlus / Telegram / Server酱 / 飞书机器人 / QQ（Qmsg）/ Bark
 - **多 API 切换** — 可配置多个 API 方案，一键切换，即时生效
 - **开发者配置** — 可保存主机SSH信息、github token，实现快速管理远程主机、管理github仓库
+- **增强稳定性** — 增加会话懒加载、刷新缓存、事件作用域隔离和多条回归脚本，降低刷新慢、串会话和状态栏滞后的风险
 
 ## 前提条件
 
@@ -45,8 +53,8 @@ https://github.com/ZgDaniel/cc-web 给我装！
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/ZgDaniel/cc-web.git
-cd cc-web
+git clone https://github.com/6Leokk/cc-web-enhance.git
+cd cc-web-enhance
 npm install
 cp .env.example .env    # 可选，不设密码则首次启动自动生成
 npm start
@@ -55,8 +63,8 @@ npm start
 ### Windows
 
 ```cmd
-git clone https://github.com/ZgDaniel/cc-web.git
-cd cc-web
+git clone https://github.com/6Leokk/cc-web-enhance.git
+cd cc-web-enhance
 npm install
 copy .env.example .env  & REM 可选
 ```
@@ -189,19 +197,32 @@ tail -f logs/process.log | jq .
 
 ## 生产部署
 
+部署前建议先确认本地验证通过：
+
+```bash
+npm run regression
+npm run regression:ui
+```
+
+安全注意：
+
+- 不要提交 `.env`、`config/`、`sessions/`、`logs/`、`attachments/`、`.npmrc` 或私钥文件。
+- 默认只监听 `127.0.0.1`。需要公网访问时，优先使用 Tailscale、Cloudflare Tunnel 或 Nginx 反向代理，并限制来源 IP。
+- 如果使用 `HOST=0.0.0.0` 暴露到局域网，请确认密码足够强，且防火墙只允许可信设备访问。
+
 ### systemd 服务
 
-创建 `/etc/systemd/system/cc-web.service`：
+创建 `/etc/systemd/system/cc-web-enhance.service`：
 
 ```ini
 [Unit]
-Description=CC-Web - Claude Code Web Chat UI
+Description=CC-Web Enhance - Claude Code / Codex Web UI
 After=network.target
 
 [Service]
 Type=simple
 User=your-user
-WorkingDirectory=/path/to/cc-web
+WorkingDirectory=/path/to/cc-web-enhance
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
@@ -215,8 +236,10 @@ WantedBy=multi-user.target
 > **`KillMode=process` 非常重要**：确保 systemd 重启服务时只杀 Node.js 进程，Claude 子进程继续运行，服务恢复后自动重新挂载。
 
 ```bash
-sudo systemctl enable cc-web
-sudo systemctl start cc-web
+sudo systemctl daemon-reload
+sudo systemctl enable cc-web-enhance
+sudo systemctl start cc-web-enhance
+sudo systemctl status cc-web-enhance --no-pager -l
 ```
 
 ### Nginx 反向代理
@@ -252,7 +275,7 @@ server {
 
 **启动方式**：双击 `start.bat`，或在终端运行：
 ```cmd
-cd cc-web
+cd cc-web-enhance
 npm install
 node server.js
 ```

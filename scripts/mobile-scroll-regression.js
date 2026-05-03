@@ -13,7 +13,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const visibilityHandler = appJs.match(/document\.addEventListener\('visibilitychange',\s*\(\)\s*=>\s*{[\s\S]*?\n\s*}\);/);
+const visibilityStart = appJs.indexOf("document.addEventListener('visibilitychange'");
+const visibilityEnd = appJs.indexOf("window.addEventListener('pagehide'", visibilityStart);
+const visibilityHandler = visibilityStart >= 0 && visibilityEnd > visibilityStart
+  ? [appJs.slice(visibilityStart, visibilityEnd)]
+  : null;
 
 assert(visibilityHandler, 'visibilitychange foreground sync handler is missing');
 assert(
@@ -26,8 +30,9 @@ assert(
 );
 assert(
   /isGenerating\s*\|\|\s*currentSessionRunning/.test(visibilityHandler[0]) &&
-    /send\(\{\s*type:\s*'load_session',\s*sessionId:\s*currentSessionId\s*\}\)/.test(visibilityHandler[0]),
-  'returning to the foreground should reload only active/running sessions',
+    /openSession\(currentSessionId,\s*\{[\s\S]*forceSync:\s*true[\s\S]*blocking:\s*false/.test(visibilityHandler[0]) &&
+    !/send\(\{\s*type:\s*'load_session',\s*sessionId:\s*currentSessionId\s*\}\)/.test(visibilityHandler[0]),
+  'returning to the foreground should refresh active/running sessions through the shared owned-load contract',
 );
 
 assert(
@@ -140,9 +145,58 @@ assert(
   'session_info handling should accept only the active requestId when one is present',
 );
 assert(
+  /function\s+shouldApplySessionInfo\(msg\)[\s\S]*return\s+!!msg\?\.requestId\s*&&\s*activeSessionLoad\.requestId\s*===\s*msg\.requestId/.test(appJs),
+  'active session loads must reject no-requestId session_info responses',
+);
+assert(
   /function\s+shouldApplySessionHistoryChunk\(msg\)[\s\S]*msg\?\.requestId[\s\S]*activeSessionLoad\.requestId\s*===\s*msg\.requestId/.test(appJs) &&
     /case 'session_history_chunk':[\s\S]*shouldApplySessionHistoryChunk\(msg\)/.test(appJs),
   'session_history_chunk handling should accept only the active requestId when one is present',
+);
+assert(
+  /function\s+shouldApplySessionHistoryChunk\(msg\)[\s\S]*return\s+!!msg\?\.requestId\s*&&\s*activeSessionLoad\.requestId\s*===\s*msg\.requestId/.test(appJs),
+  'active session loads must reject no-requestId history chunk responses',
+);
+assert(
+  /function\s+ensureHistoryViewportFilled\(\)[\s\S]*hasOlderHistory\(\)[\s\S]*messagesDiv\.scrollHeight[\s\S]*messagesDiv\.clientHeight[\s\S]*requestOlderHistory\(\)/.test(appJs),
+  'lazy history loading should proactively fetch older chunks when the initial viewport has no scrollbar',
+);
+assert(
+  /case 'session_info':[\s\S]*scheduleHistoryViewportFill\(\)/.test(appJs) &&
+    /case 'session_history_chunk':[\s\S]*scheduleHistoryViewportFill\(\)/.test(appJs),
+  'lazy history viewport filling should run after both initial session loads and older-history chunk prepends',
+);
+assert(
+  /ws\.onclose\s*=\s*\(\)\s*=>\s*\{[\s\S]*clearHistoryLoad\(\)/.test(appJs),
+  'websocket disconnects should clear any in-flight history load state',
+);
+assert(
+  /function\s+send\(data\)\s*\{[\s\S]*return\s+false;[\s\S]*return\s+true;/.test(appJs) &&
+    /if\s*\(!send\(\{[\s\S]*type:\s*'load_session_history_chunk'[\s\S]*\}\)\)\s*\{[\s\S]*clearHistoryLoad\(currentSessionId\)/.test(appJs),
+  'history fetch requests should unwind activeHistoryLoad when the websocket is unavailable',
+);
+assert(
+  /function\s+beginSessionSwitch\(sessionId,\s*options\s*=\s*\{}\)[\s\S]*setSessionLoading\(sessionId[\s\S]*if\s*\(!send\(\{\s*type:\s*'load_session',\s*sessionId,\s*requestId\s*\}\)\)\s*\{[\s\S]*clearSessionLoading\(sessionId\)[\s\S]*return;[\s\S]*loadedHistorySessionId\s*=\s*null;/.test(appJs),
+  'session switches should unwind activeSessionLoad without dropping current lazy-history ownership when load_session cannot be sent',
+);
+assert(
+  /case 'session_list':[\s\S]*scheduleHistoryViewportFill\(\)/.test(appJs),
+  'session list refreshes should retry underfilled lazy history after reconnects',
+);
+assert(
+  /function\s+matchesActiveLoadError\(activeLoad,\s*msg\)/.test(appJs) &&
+    /case 'error':[\s\S]*matchesActiveLoadError\(activeSessionLoad,\s*msg\)/.test(appJs) &&
+    /case 'error':[\s\S]*matchesActiveLoadError\(activeHistoryLoad,\s*msg\)/.test(appJs),
+  'scoped load errors should clear only the matching active session or history request',
+);
+assert(
+  /function\s+handleLoadSession\(ws,\s*sessionId,\s*requestId[\s\S]*type:\s*'error'[\s\S]*requestId[\s\S]*sessionId[\s\S]*Session not found/.test(serverJs) &&
+    /function\s+handleLoadSessionHistoryChunk\(ws,\s*msg\)[\s\S]*type:\s*'error'[\s\S]*requestId[\s\S]*sessionId[\s\S]*Session not found/.test(serverJs),
+  'load_session and lazy-history protocol errors should be scoped with requestId and sessionId',
+);
+assert(
+  !/currentHistoryComplete\s*=\s*currentHistoryComplete\s*\|\|\s*nextHistoryComplete/.test(appJs),
+  'preserveStreaming history refresh must not mask newly-available older history',
 );
 assert(
   /function\s+handleLoadSession\(ws,\s*sessionId,\s*requestId/.test(serverJs) &&
@@ -154,6 +208,20 @@ assert(
   /function\s+forceMessagesBottomAfterSessionSwitch\(\)[\s\S]*forceMessagesBottomAfterForeground\(\)/.test(appJs) &&
     /function\s+finishSessionSwitch\(sessionId\)[\s\S]*forceMessagesBottomAfterSessionSwitch\(\)/.test(appJs),
   'blocking session switches should keep the view anchored to the bottom while layout/history settles',
+);
+assert(
+  /function\s+setSessionLoading\(sessionId,\s*options\s*=\s*\{}\)[\s\S]*anchorToBottom/.test(appJs),
+  'session loading state should preserve whether this load must end at the latest message',
+);
+assert(
+  /function\s+shouldAnchorBottomAfterSessionLoad\(sessionId\)/.test(appJs) &&
+    /function\s+finishSessionSwitch\(sessionId\)[\s\S]*shouldAnchorBottomAfterSessionLoad\(sessionId\)[\s\S]*forceMessagesBottomAfterSessionSwitch\(\)/.test(appJs),
+  'session switch completion should anchor by explicit navigation intent, not only by blocking overlays',
+);
+assert(
+  /function\s+openSession\(sessionId,\s*options\s*=\s*\{}\)[\s\S]*sessionId\s*!==\s*currentSessionId/.test(appJs) &&
+    /disposition\s*===\s*'weak'[\s\S]*beginSessionSwitch\(sessionId,\s*\{[\s\S]*anchorToBottom/.test(appJs),
+  'weak-cache session switches must preserve cross-session bottom anchoring through the background sync load',
 );
 assert(
   /let\s+hasCompletedInitialSessionLoad\s*=\s*false/.test(appJs),

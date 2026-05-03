@@ -108,6 +108,7 @@
   let codexConfigCache = null;
   let loadedHistorySessionId = null;
   let activeSessionLoad = null;
+  let activeHistoryLoad = null;
   let sidebarSwipe = null;
   let streamingSegmentEls = [];
   let sidebarSwipeEnabled = localStorage.getItem(SIDEBAR_SWIPE_STORAGE_KEY) === '1';
@@ -120,9 +121,14 @@
   let currentWorkspaceStatus = null;
   let currentTotalUsage = null;
   let currentLastUsage = null;
+  let currentContextWindowTokens = null;
   let currentTaskMode = 'local';
   let currentRemoteCwd = '';
   let currentSessionRunning = false;
+  let currentHistoryCursor = 0;
+  let currentHistoryTotal = 0;
+  let currentHistoryBuffered = 0;
+  let currentHistoryComplete = true;
   let skipDeleteConfirm = localStorage.getItem('cc-web-skip-delete-confirm') === '1';
   let pendingInitialSessionLoad = false;
   let hasCompletedInitialSessionLoad = false;
@@ -133,6 +139,7 @@
   let messagesWereNearBottomBeforeHidden = true;
   let messagesWereNearBottomBeforeViewportChange = true;
   let sessionLoadRequestSeq = 0;
+  let historyViewportFillScheduled = false;
 
   // --- DOM ---
   const $ = (sel) => document.querySelector(sel);
@@ -904,13 +911,22 @@
       totalCost: typeof payload.totalCost === 'number' ? payload.totalCost : 0,
       totalUsage: payload.totalUsage ? deepClone(payload.totalUsage) : null,
       lastUsage: payload.lastUsage ? deepClone(payload.lastUsage) : null,
+      contextWindowTokens: Number(payload.contextWindowTokens || 0) > 0 ? Number(payload.contextWindowTokens) : null,
       workspaceStatus: payload.workspaceStatus ? deepClone(payload.workspaceStatus) : null,
       updated: payload.updated || null,
       isRunning: !!payload.isRunning,
       taskMode: payload.taskMode || 'local',
       remoteCwd: payload.remoteCwd || '',
+      historyTotal: Number(payload.historyTotal || 0),
+      historyBuffered: Number(payload.historyBuffered || 0),
+      historyCursor: Number(payload.historyCursor || 0),
+      historyComplete: payload.historyComplete === undefined
+        ? Number(payload.historyCursor || 0) <= 0
+        : !!payload.historyComplete,
       historyPending: !!payload.historyPending,
-      complete: options.complete !== undefined ? !!options.complete : !payload.historyPending,
+      complete: options.complete !== undefined
+        ? !!options.complete
+        : (payload.historyComplete !== undefined ? !!payload.historyComplete : !payload.historyPending),
     };
   }
 
@@ -1309,6 +1325,7 @@
   }
 
   function resolveContextWindowTokens(agent = currentAgent, model = currentModel) {
+    if (Number(currentContextWindowTokens || 0) > 0) return Number(currentContextWindowTokens);
     const normalizedAgent = normalizeAgent(agent);
     const raw = String(model || '').trim().toLowerCase();
     if (!raw) return null;
@@ -1322,17 +1339,6 @@
       return null;
     }
     return null;
-  }
-
-  function formatCurrentContextUsageText() {
-    const total = resolveContextWindowTokens(currentAgent, currentModel);
-    let used = null;
-    if (currentLastUsage) {
-      used = Number(currentLastUsage.inputTokens || 0);
-    }
-    const usedText = used == null ? '?' : formatTokenCompact(used);
-    const totalText = total == null ? '?' : formatTokenCompact(total);
-    return `${usedText} / ${totalText}`;
   }
 
   function formatTotalUsageText() {
@@ -1360,15 +1366,12 @@
     }
     const modelText = formatModelDisplay(currentModel, currentReasoningEffort);
     const cwdText = formatWorkspacePath(resolveComposerCwd());
-    const contextText = formatCurrentContextUsageText();
     const totalUsageText = formatTotalUsageText();
     const gitText = formatWorkspaceGitText();
     composerStatusline.innerHTML = [
       `<span class="composer-status-segment is-model">${escapeHtml(modelText)}</span>`,
       `<span class="composer-status-separator">|</span>`,
       `<span class="composer-status-segment is-cwd">${escapeHtml(cwdText)}</span>`,
-      `<span class="composer-status-separator">|</span>`,
-      `<span class="composer-status-segment is-context">${escapeHtml(contextText)}</span>`,
       `<span class="composer-status-separator">|</span>`,
       `<span class="composer-status-segment is-total">${escapeHtml(totalUsageText)}</span>`,
       `<span class="composer-status-separator">|</span>`,
@@ -1458,12 +1461,18 @@
     currentSessionId = null;
     loadedHistorySessionId = null;
     clearSessionLoading();
+    activeHistoryLoad = null;
 	    currentCwd = null;
 	    currentWorkspaceStatus = null;
 	    currentTotalUsage = null;
       currentLastUsage = null;
+      currentContextWindowTokens = null;
 	    currentTaskMode = 'local';
     currentRemoteCwd = '';
+    currentHistoryCursor = 0;
+    currentHistoryTotal = 0;
+    currentHistoryBuffered = 0;
+    currentHistoryComplete = true;
     setCurrentSessionRunningState(false);
     currentModel = currentAgent === 'claude' ? 'opus' : '';
     currentReasoningEffort = '';
@@ -1507,8 +1516,29 @@
 	    currentCwd = snapshot.cwd || null;
 	    currentWorkspaceStatus = snapshot.workspaceStatus ? deepClone(snapshot.workspaceStatus) : null;
       currentLastUsage = snapshot.lastUsage ? deepClone(snapshot.lastUsage) : null;
-	    currentTaskMode = snapshot.taskMode || 'local';
+      currentContextWindowTokens = Number(snapshot.contextWindowTokens || snapshot.lastUsage?.contextWindowTokens || 0) > 0
+        ? Number(snapshot.contextWindowTokens || snapshot.lastUsage?.contextWindowTokens)
+        : null;
+    currentTaskMode = snapshot.taskMode || 'local';
     currentRemoteCwd = snapshot.remoteCwd || '';
+    const nextHistoryTotal = Number(snapshot.historyTotal || 0);
+    const nextHistoryBuffered = Number(snapshot.historyBuffered || 0);
+    const nextHistoryCursor = Number(snapshot.historyCursor || 0);
+    if (preserveStreaming && snapshot.sessionId === currentSessionId) {
+      currentHistoryTotal = Math.max(currentHistoryTotal || 0, nextHistoryTotal);
+      currentHistoryBuffered = Math.max(currentHistoryBuffered || 0, nextHistoryBuffered);
+      if (Number(currentHistoryCursor || 0) > 0 && nextHistoryCursor > 0) {
+        currentHistoryCursor = Math.min(currentHistoryCursor, nextHistoryCursor);
+      } else {
+        currentHistoryCursor = Number(currentHistoryCursor || nextHistoryCursor || 0);
+      }
+    } else {
+      currentHistoryTotal = nextHistoryTotal;
+      currentHistoryBuffered = nextHistoryBuffered;
+      currentHistoryCursor = nextHistoryCursor;
+    }
+    currentHistoryComplete = currentHistoryCursor <= 0 && currentHistoryBuffered >= currentHistoryTotal;
+    clearHistoryLoad(snapshot.sessionId);
     updateCwdBadge();
     if (snapshot.mode && MODE_LABELS[snapshot.mode]) {
       currentMode = snapshot.mode;
@@ -1596,6 +1626,21 @@
     setSessionLoading(null, { blocking: false });
   }
 
+  function setHistoryLoadState(sessionId, options = {}) {
+    activeHistoryLoad = sessionId
+      ? {
+        sessionId,
+        requestId: options.requestId || '',
+        historyCursor: Number(options.historyCursor || 0),
+      }
+      : null;
+  }
+
+  function clearHistoryLoad(sessionId) {
+    if (sessionId && activeHistoryLoad && activeHistoryLoad.sessionId !== sessionId) return;
+    setHistoryLoadState(null);
+  }
+
   function isBlockingSessionLoad(sessionId) {
     return !!(activeSessionLoad &&
       activeSessionLoad.blocking &&
@@ -1618,6 +1663,10 @@
   }
 
   function shouldApplySessionHistoryChunk(msg) {
+    if (activeHistoryLoad) {
+      if (activeHistoryLoad.sessionId !== msg?.sessionId) return false;
+      return !!msg?.requestId && activeHistoryLoad.requestId === msg.requestId;
+    }
     if (activeSessionLoad) {
       if (activeSessionLoad.sessionId !== msg?.sessionId) return false;
       return !!msg?.requestId && activeSessionLoad.requestId === msg.requestId;
@@ -1626,23 +1675,74 @@
     return msg?.sessionId === currentSessionId && loadedHistorySessionId === msg.sessionId;
   }
 
+  function isCurrentSessionEvent(msg) {
+    return !msg?.sessionId || msg.sessionId === currentSessionId;
+  }
+
+  function matchesActiveLoadError(activeLoad, msg) {
+    if (!activeLoad) return false;
+    if (msg?.sessionId && activeLoad.sessionId !== msg.sessionId) return false;
+    if (msg?.requestId) return activeLoad.requestId === msg.requestId;
+    return !msg?.sessionId || activeLoad.sessionId === msg.sessionId;
+  }
+
   function finishSessionSwitch(sessionId) {
     if (shouldAnchorBottomAfterSessionLoad(sessionId)) {
       forceMessagesBottomAfterSessionSwitch();
     }
     if (isBlockingSessionLoad(sessionId)) {
-      requestAnimationFrame(() => clearSessionLoading(sessionId));
+      requestAnimationFrame(() => {
+        clearSessionLoading(sessionId);
+        ensureHistoryViewportFilled();
+      });
       return;
     }
     clearSessionLoading(sessionId);
+    ensureHistoryViewportFilled();
   }
 
   function finalizeLoadedSession(sessionId) {
     if (activeSessionLoad?.sessionId === sessionId && activeSessionLoad.snapshot) {
-      activeSessionLoad.snapshot.complete = true;
+      activeSessionLoad.snapshot.complete = !!activeSessionLoad.snapshot.complete;
       cacheSessionSnapshot(activeSessionLoad.snapshot);
     }
     finishSessionSwitch(sessionId);
+  }
+
+  function hasOlderHistory() {
+    return currentHistoryCursor > 0 && !currentHistoryComplete;
+  }
+
+  function ensureHistoryViewportFilled() {
+    historyViewportFillScheduled = false;
+    if (!currentSessionId || loadedHistorySessionId !== currentSessionId) return;
+    if (activeSessionLoad || activeHistoryLoad) return;
+    if (!hasOlderHistory()) return;
+    if (messagesDiv.clientHeight <= 0) return;
+    if (messagesDiv.scrollHeight > messagesDiv.clientHeight) return;
+    requestOlderHistory();
+  }
+
+  function scheduleHistoryViewportFill() {
+    if (historyViewportFillScheduled) return;
+    historyViewportFillScheduled = true;
+    requestAnimationFrame(() => ensureHistoryViewportFilled());
+  }
+
+  function requestOlderHistory() {
+    if (!currentSessionId || loadedHistorySessionId !== currentSessionId) return;
+    if (activeSessionLoad || activeHistoryLoad) return;
+    if (!hasOlderHistory()) return;
+    const requestId = `history-${Date.now()}-${++sessionLoadRequestSeq}`;
+    setHistoryLoadState(currentSessionId, { requestId, historyCursor: currentHistoryCursor });
+    if (!send({
+      type: 'load_session_history_chunk',
+      sessionId: currentSessionId,
+      requestId,
+      historyCursor: currentHistoryCursor,
+    })) {
+      clearHistoryLoad(currentSessionId);
+    }
   }
 
   function beginSessionSwitch(sessionId, options = {}) {
@@ -1652,11 +1752,15 @@
     const anchorToBottom = options.anchorToBottom !== undefined ? !!options.anchorToBottom : blocking;
     if (!force && activeSessionLoad?.sessionId === sessionId) return;
     if (!force && sessionId === currentSessionId && !activeSessionLoad) return;
-    renderEpoch++;
-    loadedHistorySessionId = null;
     const requestId = `${Date.now()}-${++sessionLoadRequestSeq}`;
     setSessionLoading(sessionId, { blocking, label: options.label, requestId, anchorToBottom });
-    send({ type: 'load_session', sessionId, requestId });
+    if (!send({ type: 'load_session', sessionId, requestId })) {
+      clearSessionLoading(sessionId);
+      return;
+    }
+    renderEpoch++;
+    loadedHistorySessionId = null;
+    clearHistoryLoad();
   }
 
   function showCachedSession(sessionId) {
@@ -1711,6 +1815,9 @@
 	  function setStatsDisplay(msg) {
 	    currentTotalUsage = msg?.totalUsage ? deepClone(msg.totalUsage) : null;
       currentLastUsage = msg?.lastUsage ? deepClone(msg.lastUsage) : null;
+      currentContextWindowTokens = Number(msg?.contextWindowTokens || msg?.lastUsage?.contextWindowTokens || 0) > 0
+        ? Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens)
+        : null;
 	    if (currentAgent === 'codex' && msg && msg.totalUsage) {
       const usage = msg.totalUsage;
       if ((usage.inputTokens || 0) > 0 || (usage.outputTokens || 0) > 0) {
@@ -1901,13 +2008,16 @@
 
     ws.onclose = () => {
       clearSessionLoading();
+      clearHistoryLoad();
       scheduleReconnect();
     };
     ws.onerror = () => {};
   }
 
   function send(data) {
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify(data));
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify(data));
+    return true;
   }
 
   function scheduleReconnect() {
@@ -1972,6 +2082,7 @@
           resetChatView(currentAgent);
         }
         refreshCurrentSessionAfterMetadataChange(previousCurrentMeta, currentSessionId ? getSessionMeta(currentSessionId) : null);
+        scheduleHistoryViewportFill();
         break;
 
       case 'session_info':
@@ -1993,21 +2104,22 @@
             finishSessionSwitch(msg.sessionId);
           }
         }
+        scheduleHistoryViewportFill();
         break;
 
       case 'session_history_chunk':
         if (shouldApplySessionHistoryChunk(msg)) {
-          const blocking = isBlockingSessionLoad(msg.sessionId);
-          if (activeSessionLoad?.sessionId === msg.sessionId && activeSessionLoad.snapshot) {
-            activeSessionLoad.snapshot.messages = cloneMessages(msg.messages || []).concat(activeSessionLoad.snapshot.messages);
-          }
+          clearHistoryLoad(msg.sessionId);
+          currentHistoryCursor = Number(msg.historyCursor || 0);
+          currentHistoryTotal = Number(msg.historyTotal || currentHistoryTotal || 0);
+          currentHistoryBuffered = Number(msg.historyBuffered || currentHistoryBuffered || 0);
+          currentHistoryComplete = !!msg.historyComplete || currentHistoryCursor <= 0;
           prependHistoryMessages(msg.messages || [], {
-            preserveScroll: !blocking,
-            skipScrollbar: blocking,
+            preserveScroll: true,
+            skipScrollbar: false,
           });
-          if (!msg.remaining) {
-            finalizeLoadedSession(msg.sessionId);
-          }
+          loadedHistorySessionId = msg.sessionId;
+          scheduleHistoryViewportFill();
         }
         break;
 
@@ -2022,12 +2134,14 @@
         break;
 
       case 'text_delta':
+        if (!isCurrentSessionEvent(msg)) break;
         if (!isGenerating) startGenerating();
         pendingText += msg.text;
         scheduleRender();
         break;
 
       case 'assistant_segment_start':
+        if (!isCurrentSessionEvent(msg)) break;
         if (!isGenerating) {
           startGenerating();
         } else if (assistantMessageMode === 'segmented') {
@@ -2039,12 +2153,14 @@
         break;
 
       case 'tool_start':
+        if (!isCurrentSessionEvent(msg)) break;
         if (!isGenerating) startGenerating();
         activeToolCalls.set(msg.toolUseId, { name: msg.name, input: msg.input, kind: msg.kind || null, meta: msg.meta || null, done: false });
         appendToolCall(msg.toolUseId, msg.name, msg.input, false, msg.kind || null, msg.meta || null);
         break;
 
       case 'tool_end':
+        if (!isCurrentSessionEvent(msg)) break;
         if (activeToolCalls.has(msg.toolUseId)) {
           activeToolCalls.get(msg.toolUseId).done = true;
           if (msg.kind) activeToolCalls.get(msg.toolUseId).kind = msg.kind;
@@ -2055,22 +2171,46 @@
         break;
 
       case 'cost':
+        if (!isCurrentSessionEvent(msg)) {
+          if (msg.sessionId) {
+            updateCachedSession(msg.sessionId, (snapshot) => { snapshot.totalCost = msg.costUsd; });
+          }
+          break;
+        }
         costDisplay.textContent = `$${msg.costUsd.toFixed(4)}`;
-        if (currentSessionId) {
-          updateCachedSession(currentSessionId, (snapshot) => { snapshot.totalCost = msg.costUsd; });
+        if (msg.sessionId || currentSessionId) {
+          updateCachedSession(msg.sessionId || currentSessionId, (snapshot) => { snapshot.totalCost = msg.costUsd; });
         }
         break;
 
       case 'usage':
         if (msg.totalUsage) {
+          if (!isCurrentSessionEvent(msg)) {
+            if (msg.sessionId) {
+              updateCachedSession(msg.sessionId, (snapshot) => {
+                snapshot.totalUsage = deepClone(msg.totalUsage);
+                snapshot.lastUsage = msg.lastUsage ? deepClone(msg.lastUsage) : snapshot.lastUsage || null;
+                if (Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens || 0) > 0) {
+                  snapshot.contextWindowTokens = Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens);
+                }
+              });
+            }
+            break;
+          }
           currentLastUsage = msg.lastUsage ? deepClone(msg.lastUsage) : currentLastUsage;
+          if (Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens || 0) > 0) {
+            currentContextWindowTokens = Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens);
+          }
           currentTotalUsage = deepClone(msg.totalUsage);
           const cacheText = msg.totalUsage.cachedInputTokens ? ` · cache ${msg.totalUsage.cachedInputTokens}` : '';
           costDisplay.textContent = `in ${msg.totalUsage.inputTokens} · out ${msg.totalUsage.outputTokens}${cacheText}`;
-          if (currentSessionId) {
-            updateCachedSession(currentSessionId, (snapshot) => {
+          if (msg.sessionId || currentSessionId) {
+            updateCachedSession(msg.sessionId || currentSessionId, (snapshot) => {
               snapshot.totalUsage = deepClone(msg.totalUsage);
               snapshot.lastUsage = msg.lastUsage ? deepClone(msg.lastUsage) : snapshot.lastUsage || null;
+              if (Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens || 0) > 0) {
+                snapshot.contextWindowTokens = Number(msg.contextWindowTokens || msg.lastUsage?.contextWindowTokens);
+              }
             });
           }
           renderComposerStatusline();
@@ -2084,30 +2224,47 @@
         break;
 
       case 'done':
+        if (!isCurrentSessionEvent(msg)) break;
         finishGenerating(msg.sessionId);
         break;
 
       case 'system_message':
+        if (!isCurrentSessionEvent(msg)) break;
         appendSystemMessage(msg.message);
         break;
 
       case 'mode_changed':
+        if (!isCurrentSessionEvent(msg)) {
+          if (msg.sessionId) {
+            updateCachedSession(msg.sessionId, (snapshot) => { snapshot.mode = msg.mode; });
+          }
+          break;
+        }
         if (msg.mode && MODE_LABELS[msg.mode]) {
           currentMode = msg.mode;
           modeSelect.value = currentMode;
           localStorage.setItem(getAgentModeStorageKey(currentAgent), currentMode);
-          if (currentSessionId) {
-            updateCachedSession(currentSessionId, (snapshot) => { snapshot.mode = msg.mode; });
+          if (msg.sessionId || currentSessionId) {
+            updateCachedSession(msg.sessionId || currentSessionId, (snapshot) => { snapshot.mode = msg.mode; });
           }
         }
         break;
 
       case 'model_changed':
+        if (!isCurrentSessionEvent(msg)) {
+          if (msg.sessionId) {
+            updateCachedSession(msg.sessionId, (snapshot) => {
+              snapshot.model = msg.model;
+              snapshot.reasoningEffort = msg.reasoningEffort || '';
+            });
+          }
+          break;
+        }
         if (msg.model) {
           currentModel = msg.model;
           currentReasoningEffort = msg.reasoningEffort || '';
-          if (currentSessionId) {
-            updateCachedSession(currentSessionId, (snapshot) => {
+          if (msg.sessionId || currentSessionId) {
+            updateCachedSession(msg.sessionId || currentSessionId, (snapshot) => {
               snapshot.model = msg.model;
               snapshot.reasoningEffort = msg.reasoningEffort || '';
             });
@@ -2130,6 +2287,7 @@
 
       case 'resume_generating':
         // Server has an active process for this session — resume streaming
+        if (msg.sessionId !== currentSessionId) break;
         setCurrentSessionRunningState(true);
         isGenerating = true;
         sendBtn.hidden = true;
@@ -2139,8 +2297,21 @@
         break;
 
       case 'error':
+        if (msg.sessionId && msg.sessionId !== currentSessionId && !matchesActiveLoadError(activeSessionLoad, msg) && !matchesActiveLoadError(activeHistoryLoad, msg)) {
+          break;
+        }
         appendError(msg.message);
-        clearSessionLoading();
+        if (msg.requestId || msg.sessionId) {
+          if (matchesActiveLoadError(activeSessionLoad, msg)) {
+            clearSessionLoading(activeSessionLoad?.sessionId || msg.sessionId);
+          }
+          if (matchesActiveLoadError(activeHistoryLoad, msg)) {
+            clearHistoryLoad(activeHistoryLoad?.sessionId || msg.sessionId);
+          }
+        } else {
+          clearSessionLoading();
+          clearHistoryLoad();
+        }
         if (!isGenerating && currentSessionId) {
           setCurrentSessionRunningState(!!getSessionMeta(currentSessionId)?.isRunning);
         }
@@ -2589,6 +2760,7 @@
       messages.forEach((message) => frag.appendChild(buildMsgElement(message)));
       messagesDiv.appendChild(frag);
       scrollToBottom();
+      scheduleHistoryViewportFill();
       return;
     }
     // Batch render: last 10 first, then next 20, then the rest
@@ -2610,6 +2782,9 @@
     for (let i = batches[0][0]; i < batches[0][1]; i++) frag0.appendChild(buildMsgElement(messages[i]));
     messagesDiv.appendChild(frag0);
     scrollToBottom();
+    if (batches.length === 1) {
+      scheduleHistoryViewportFill();
+    }
 
     // Render remaining batches asynchronously, prepending each
     // Use scrollHeight delta to keep current view position stable after prepend
@@ -2627,6 +2802,9 @@
         // Compensate scrollTop so visible area stays unchanged
         messagesDiv.scrollTop = prevScrollTop + (messagesDiv.scrollHeight - prevHeight);
         updateScrollbar();
+        if (b === batches.length - 1) {
+          scheduleHistoryViewportFill();
+        }
       }, delay);
     }
   }
@@ -2649,6 +2827,7 @@
     messagesDiv.insertBefore(frag, messagesDiv.firstChild);
     messagesDiv.scrollTop = prevScrollTop + (messagesDiv.scrollHeight - prevHeight);
     if (!skipScrollbar) updateScrollbar();
+    scheduleHistoryViewportFill();
   }
 
   function normalizeAskUserInput(input) {
@@ -3072,6 +3251,9 @@
   messagesDiv.addEventListener('scroll', () => {
     updateUserBottomState();
     updateScrollbar();
+    if (messagesDiv.scrollTop <= 80) {
+      requestOlderHistory();
+    }
     // 移动端：滚动时短暂显示滑块，停止后淡出
     scrollbarEl.classList.add('scrolling');
     clearTimeout(scrollbarEl._hideTimer);
@@ -3081,7 +3263,10 @@
   }, { passive: true });
   messagesDiv.addEventListener('touchstart', cancelForegroundBottomAnchor, { passive: true });
   messagesDiv.addEventListener('wheel', cancelForegroundBottomAnchor, { passive: true });
-  new ResizeObserver(updateScrollbar).observe(messagesDiv);
+  new ResizeObserver(() => {
+    updateScrollbar();
+    scheduleHistoryViewportFill();
+  }).observe(messagesDiv);
 
   // Drag logic
   let dragStartY = 0, dragStartScrollTop = 0, isDragging = false;

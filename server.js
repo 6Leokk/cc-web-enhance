@@ -6,7 +6,15 @@ const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { createAgentRuntime } = require('./lib/agent-runtime');
+const { parseClaudeTranscriptLines } = require('./lib/claude-transcript');
+const { applyCodexParsedTelemetryToSession } = require('./lib/codex-telemetry');
 const { createCodexRolloutStore } = require('./lib/codex-rollouts');
+const {
+  staticCacheControl,
+  selectStaticContentEncoding,
+  buildStaticEtag,
+  createStaticAssetCompressionCache,
+} = require('./lib/static-delivery');
 const {
   DEFAULT_ASSISTANT_MESSAGE_MODE,
   buildAssistantCompletionMessages,
@@ -35,6 +43,7 @@ const ATTACHMENTS_DIR = path.join(SESSIONS_DIR, '_attachments');
 const ATTACHMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const MAX_MESSAGE_ATTACHMENTS = 4;
+const staticAssetCompressionCache = createStaticAssetCompressionCache();
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const NOTIFY_CONFIG_PATH = path.join(CONFIG_DIR, 'notify.json');
 const AUTH_CONFIG_PATH = path.join(CONFIG_DIR, 'auth.json');
@@ -733,6 +742,21 @@ function readCodexReasoningEffortFromHome(homeDir) {
   }
 }
 
+function readCodexContextWindowFromHome(homeDir) {
+  const base = String(homeDir || '').trim();
+  if (!base) return null;
+  try {
+    const configPath = path.join(base, 'config.toml');
+    if (!fs.existsSync(configPath)) return null;
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const match = raw.match(/^\s*model_context_window\s*=\s*(\d+)/im);
+    const value = Number(match?.[1] || 0);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeCodexModelList(models, defaultModel = '') {
   const seen = new Set();
   const list = [];
@@ -1205,6 +1229,18 @@ function wsSend(ws, data, dropIfBacklogged = false) {
   ws.send(JSON.stringify(data));
 }
 
+function withOptionalSessionId(sessionId, payload) {
+  return sessionId ? { ...payload, sessionId } : payload;
+}
+
+function sendSessionSystemMessage(ws, sessionId, message) {
+  wsSend(ws, withOptionalSessionId(sessionId, { type: 'system_message', message }));
+}
+
+function sendSessionError(ws, sessionId, message) {
+  wsSend(ws, withOptionalSessionId(sessionId, { type: 'error', message }));
+}
+
 function sanitizeId(id) {
   return String(id).replace(/[^a-zA-Z0-9\-]/g, '');
 }
@@ -1378,6 +1414,15 @@ function normalizeSession(session) {
     session.totalUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   }
   if (!Object.prototype.hasOwnProperty.call(session, 'lastUsage')) session.lastUsage = null;
+  if (session.lastUsage && session.lastUsage.source !== 'context') session.lastUsage = null;
+  if (!Object.prototype.hasOwnProperty.call(session, 'contextWindowTokens')) session.contextWindowTokens = null;
+  const lastUsageContextWindow = Number(session.lastUsage?.contextWindowTokens || 0);
+  if (lastUsageContextWindow > 0 && !Number(session.contextWindowTokens || 0)) {
+    session.contextWindowTokens = lastUsageContextWindow;
+  }
+  if (session.agent === 'codex' && !Number(session.contextWindowTokens || 0) && session.codexHomeDir) {
+    session.contextWindowTokens = readCodexContextWindowFromHome(session.codexHomeDir);
+  }
   if (!Object.prototype.hasOwnProperty.call(session, 'taskMode')) session.taskMode = 'local';
   if (!Object.prototype.hasOwnProperty.call(session, 'sshHostId')) session.sshHostId = '';
   if (!Object.prototype.hasOwnProperty.call(session, 'remoteCwd')) session.remoteCwd = '';
@@ -1572,14 +1617,32 @@ function splitHistoryMessages(messages) {
   return { recentMessages, olderChunks };
 }
 
-function staticCacheControl(filePath) {
-  const base = path.basename(filePath);
-  if (base === 'index.html' || base === 'sw.js') return 'no-cache';
-  return 'public, max-age=0, must-revalidate';
+function buildLazyHistoryState(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  const { recentMessages, olderChunks } = splitHistoryMessages(list);
+  return {
+    recentMessages,
+    olderChunks,
+    historyTotal: list.length,
+    historyBuffered: recentMessages.length,
+    historyCursor: Math.max(0, list.length - recentMessages.length),
+    historyComplete: olderChunks.length === 0,
+  };
 }
 
-function buildStaticEtag(stat) {
-  return `W/"${Number(stat.size || 0).toString(16)}-${Math.floor(Number(stat.mtimeMs || 0)).toString(16)}"`;
+function sliceSessionHistoryChunk(messages, historyCursor) {
+  const list = Array.isArray(messages) ? messages : [];
+  const boundedCursor = Math.max(0, Math.min(list.length, Number(historyCursor || 0)));
+  const start = Math.max(0, boundedCursor - HISTORY_CHUNK_SIZE);
+  const chunkMessages = list.slice(start, boundedCursor);
+  return {
+    messages: chunkMessages,
+    historyCursor: start,
+    historyBuffered: list.length - start,
+    historyTotal: list.length,
+    remaining: Math.ceil(start / HISTORY_CHUNK_SIZE),
+    historyComplete: start === 0,
+  };
 }
 
 const IS_WIN = process.platform === 'win32';
@@ -1708,6 +1771,54 @@ class FileTailer {
     if (this.watcher) { this.watcher.close(); this.watcher = null; }
     if (this.interval) { clearInterval(this.interval); this.interval = null; }
   }
+}
+
+function walkFiles(dir, files = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkFiles(fullPath, files);
+    else if (entry.isFile()) files.push(fullPath);
+  }
+  return files;
+}
+
+function findCodexRolloutPath(codexHomeDir, threadId) {
+  const homeDir = String(codexHomeDir || '').trim();
+  const targetThreadId = String(threadId || '').trim();
+  if (!homeDir || !targetThreadId) return '';
+  const sessionsDir = path.join(homeDir, 'sessions');
+  if (!fs.existsSync(sessionsDir)) return '';
+  const expectedSuffix = `${targetThreadId}.jsonl`;
+  return walkFiles(sessionsDir, []).find((filePath) => (
+    path.basename(filePath).startsWith('rollout-') && filePath.endsWith(expectedSuffix)
+  )) || '';
+}
+
+function maybeAttachCodexRolloutTailer(entry, sessionId, hintedThreadId = '') {
+  if (!entry || entry.agent !== 'codex' || entry.codexRolloutTailer) return;
+  const threadId = String(hintedThreadId || loadSession(sessionId)?.codexThreadId || '').trim();
+  if (!threadId || !entry.codexHomeDir) return;
+  const now = Date.now();
+  if (entry.codexRolloutLookupNextAt && now < entry.codexRolloutLookupNextAt) return;
+  const rolloutPath = findCodexRolloutPath(entry.codexHomeDir, threadId);
+  if (!rolloutPath) {
+    entry.codexRolloutLookupNextAt = now + 1000;
+    return;
+  }
+  entry.codexRolloutPath = rolloutPath;
+  entry.codexRolloutLookupNextAt = 0;
+  entry.codexRolloutTailer = new FileTailer(rolloutPath, (line) => {
+    try {
+      processCodexRolloutEntry(entry, JSON.parse(line), sessionId);
+    } catch {}
+  });
+  entry.codexRolloutTailer.start();
 }
 
 // === Process Lifecycle ===
@@ -1858,6 +1969,10 @@ function handleProcessComplete(sessionId, exitCode, signal) {
     entry.tailer.readNew();
     entry.tailer.stop();
   }
+  if (entry.codexRolloutTailer) {
+    entry.codexRolloutTailer.readNew();
+    entry.codexRolloutTailer.stop();
+  }
 
   contextLimitExceeded = isContextLimitError(entry.agent || 'claude', `${entry.fullText || ''}\n${stderrSnippet || ''}\n${entry.lastError || ''}`);
   const shouldTreatAsError = shouldTreatCompletionAsError(exitCode, signal, stderrSnippet, {
@@ -1927,26 +2042,26 @@ function handleProcessComplete(sessionId, exitCode, signal) {
       if (autoRetryRequested) {
         if (contextLimitExceeded) {
           pendingCompactRetries.delete(sessionId);
-          wsSend(entry.ws, { type: 'system_message', message: '已尝试执行 /compact，但仍未成功解除上下文超限。请手动缩小输入范围后重试。' });
+          wsSend(entry.ws, { type: 'system_message', sessionId, message: '已尝试执行 /compact，但仍未成功解除上下文超限。请手动缩小输入范围后重试。' });
         } else {
-          wsSend(entry.ws, { type: 'system_message', message: compactDoneMessage(entry.agent || 'claude') });
-          wsSend(entry.ws, { type: 'system_message', message: compactAutoResumeMessage(entry.agent || 'claude') });
+          wsSend(entry.ws, { type: 'system_message', sessionId, message: compactDoneMessage(entry.agent || 'claude') });
+          wsSend(entry.ws, { type: 'system_message', sessionId, message: compactAutoResumeMessage(entry.agent || 'claude') });
           shouldReturnForFollowup = true;
         }
       } else {
-        wsSend(entry.ws, { type: 'system_message', message: compactDoneMessage(entry.agent || 'claude') });
+        wsSend(entry.ws, { type: 'system_message', sessionId, message: compactDoneMessage(entry.agent || 'claude') });
       }
     }
 
     if (contextLimitExceeded && !pendingSlash && session && getRuntimeSessionId(session)) {
       pendingCompactRetries.set(sessionId, { text: pendingRetry?.text || '', mode: pendingRetry?.mode || session.permissionMode || 'yolo', reason: 'auto' });
-      wsSend(entry.ws, { type: 'system_message', message: compactAutoStartMessage(entry.agent || 'claude') });
+      wsSend(entry.ws, { type: 'system_message', sessionId, message: compactAutoStartMessage(entry.agent || 'claude') });
       shouldAutoCompact = true;
     }
 
     if (completionError && !entry.errorSent && !shouldAutoCompact) {
       entry.errorSent = true;
-      wsSend(entry.ws, { type: 'error', message: completionError });
+      wsSend(entry.ws, { type: 'error', sessionId, message: completionError });
     }
 
     wsSend(entry.ws, {
@@ -2038,7 +2153,24 @@ function recoverProcesses() {
       if (isProcessRunning(pid)) {
         console.log(`[recovery] Re-attaching to session ${sessionId} (PID ${pid})`);
         plog('INFO', 'recovery_alive', { sessionId: sessionId.slice(0, 8), pid, agent });
-        const entry = { pid, ws: null, agent, fullText: '', toolCalls: [], assistantSegments: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
+        const entry = {
+          pid,
+          ws: null,
+          agent,
+          fullText: '',
+          toolCalls: [],
+          assistantSegments: [],
+          lastCost: null,
+          lastUsage: null,
+          lastError: null,
+          errorSent: false,
+          tailer: null,
+          codexHomeDir: session?.codexHomeDir || '',
+          codexRuntimeKey: session?.codexRuntimeKey || '',
+          codexRolloutTailer: null,
+          codexRolloutLookupNextAt: 0,
+          codexRolloutPath: '',
+        };
         activeProcesses.set(sessionId, entry);
 
         if (fs.existsSync(outputPath)) {
@@ -2046,16 +2178,35 @@ function recoverProcesses() {
             try {
               const event = JSON.parse(line);
               processRuntimeEvent(entry, event, sessionId);
+              maybeAttachCodexRolloutTailer(entry, sessionId, event.thread_id || '');
             } catch {}
           });
           entry.tailer.start();
         }
+        maybeAttachCodexRolloutTailer(entry, sessionId, session?.codexThreadId || '');
       } else {
         // Process finished while server was down — read all output and save
         console.log(`[recovery] Processing completed output for session ${sessionId}`);
         plog('INFO', 'recovery_dead', { sessionId: sessionId.slice(0, 8), pid, agent });
         if (fs.existsSync(outputPath)) {
-          const tempEntry = { pid: 0, ws: null, agent, fullText: '', toolCalls: [], assistantSegments: [], lastCost: null, lastUsage: null, lastError: null, errorSent: false, tailer: null };
+          const tempEntry = {
+            pid: 0,
+            ws: null,
+            agent,
+            fullText: '',
+            toolCalls: [],
+            assistantSegments: [],
+            lastCost: null,
+            lastUsage: null,
+            lastError: null,
+            errorSent: false,
+            tailer: null,
+            codexHomeDir: session?.codexHomeDir || '',
+            codexRuntimeKey: session?.codexRuntimeKey || '',
+            codexRolloutTailer: null,
+            codexRolloutLookupNextAt: 0,
+            codexRolloutPath: '',
+          };
           const content = fs.readFileSync(outputPath, 'utf8');
           for (const line of content.split('\n')) {
             if (!line.trim()) continue;
@@ -2187,14 +2338,17 @@ const server = http.createServer((req, res) => {
       return res.end('Not Found');
     }
     const ext = path.extname(filePath);
-    const etag = buildStaticEtag(stat);
+    const contentEncoding = selectStaticContentEncoding(req.headers['accept-encoding'], filePath);
+    const etag = buildStaticEtag(stat, contentEncoding);
     const cacheControl = staticCacheControl(filePath);
     const commonHeaders = {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Cache-Control': cacheControl,
       'ETag': etag,
       'Last-Modified': stat.mtime.toUTCString(),
+      'Vary': 'Accept-Encoding',
     };
+    if (contentEncoding) commonHeaders['Content-Encoding'] = contentEncoding;
     if (req.headers['if-none-match'] === etag) {
       res.writeHead(304, commonHeaders);
       return res.end();
@@ -2204,8 +2358,16 @@ const server = http.createServer((req, res) => {
         res.writeHead(404);
         return res.end('Not Found');
       }
+      let body = data;
+      try {
+        body = staticAssetCompressionCache.getCompressedAsset(filePath, stat, data, contentEncoding);
+      } catch {
+        body = data;
+        delete commonHeaders['Content-Encoding'];
+        commonHeaders.ETag = buildStaticEtag(stat, '');
+      }
       res.writeHead(200, commonHeaders);
-      res.end(data);
+      res.end(body);
     });
   });
 });
@@ -2282,6 +2444,9 @@ wss.on('connection', (ws, req) => {
         break;
       case 'load_session':
         handleLoadSession(ws, msg.sessionId, msg.requestId);
+        break;
+      case 'load_session_history_chunk':
+        handleLoadSessionHistoryChunk(ws, msg);
         break;
       case 'delete_session':
         handleDeleteSession(ws, msg.sessionId);
@@ -2771,6 +2936,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
           const entry = activeProcesses.get(sessionId);
           killProcess(entry.pid);
           if (entry.tailer) entry.tailer.stop();
+          if (entry.codexRolloutTailer) entry.codexRolloutTailer.stop();
           activeProcesses.delete(sessionId);
           cleanRunDir(sessionId);
         }
@@ -2791,13 +2957,14 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
           totalCost: session.totalCost || 0,
           totalUsage: session.totalUsage || null,
           lastUsage: session.lastUsage || null,
+          contextWindowTokens: session.contextWindowTokens || null,
           workspaceStatus: buildWorkspaceStatus(session),
           taskMode: session.taskMode || 'local',
           sshHostId: session.sshHostId || '',
           remoteCwd: session.remoteCwd || '',
         });
       }
-      wsSend(ws, { type: 'system_message', message: '会话已清除，上下文已重置。' });
+      sendSessionSystemMessage(ws, sessionId, '会话已清除，上下文已重置。');
       break;
     }
 
@@ -2806,7 +2973,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
       if (agent === 'codex') {
         if (!modelInput) {
           const current = session ? sessionModelDisplay(session) : (resolveDefaultCodexModel() || '配置默认模型');
-          wsSend(ws, { type: 'system_message', message: `当前 Codex 模型: ${current}\n用法: /model <模型名>` });
+          sendSessionSystemMessage(ws, sessionId, `当前 Codex 模型: ${current}\n用法: /model <模型名>`);
         } else {
           const modelSpec = splitCodexModelSpec(modelInput);
           const displayModel = modelSpec.reasoning ? `${modelSpec.base}(${modelSpec.reasoning})` : (modelSpec.base || modelInput);
@@ -2817,16 +2984,16 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
             saveSession(session);
             sendWorkspaceStatus(ws, session.id, session);
           }
-          wsSend(ws, { type: 'model_changed', model: modelSpec.base || modelInput, reasoningEffort: modelSpec.reasoning });
-          wsSend(ws, { type: 'system_message', message: `Codex 模型已切换为: ${displayModel}` });
+          wsSend(ws, withOptionalSessionId(sessionId, { type: 'model_changed', model: modelSpec.base || modelInput, reasoningEffort: modelSpec.reasoning }));
+          sendSessionSystemMessage(ws, sessionId, `Codex 模型已切换为: ${displayModel}`);
         }
       } else if (!modelInput) {
         const current = session?.model ? modelShortName(session.model) || session.model : 'opus (默认)';
-        wsSend(ws, { type: 'system_message', message: `当前模型: ${current}\n可选: opus, sonnet, haiku` });
+        sendSessionSystemMessage(ws, sessionId, `当前模型: ${current}\n可选: opus, sonnet, haiku`);
       } else {
         const modelKey = modelInput.toLowerCase();
         if (!MODEL_MAP[modelKey]) {
-          wsSend(ws, { type: 'system_message', message: `无效模型: ${modelInput}\n可选: opus, sonnet, haiku` });
+          sendSessionSystemMessage(ws, sessionId, `无效模型: ${modelInput}\n可选: opus, sonnet, haiku`);
         } else {
           const model = MODEL_MAP[modelKey];
           if (session) {
@@ -2835,8 +3002,8 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
             saveSession(session);
             sendWorkspaceStatus(ws, session.id, session);
           }
-          wsSend(ws, { type: 'model_changed', model: modelKey, reasoningEffort: '' });
-          wsSend(ws, { type: 'system_message', message: `模型已切换为: ${modelKey}` });
+          wsSend(ws, withOptionalSessionId(sessionId, { type: 'model_changed', model: modelKey, reasoningEffort: '' }));
+          sendSessionSystemMessage(ws, sessionId, `模型已切换为: ${modelKey}`);
         }
       }
       break;
@@ -2845,38 +3012,36 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
     case '/cost': {
       if (agent === 'codex') {
         const usage = session?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
-        wsSend(ws, {
-          type: 'system_message',
-          message: `当前会话累计 Token: 输入 ${usage.inputTokens}，缓存 ${usage.cachedInputTokens}，输出 ${usage.outputTokens}`,
-        });
+        sendSessionSystemMessage(ws, sessionId, `当前会话累计 Token: 输入 ${usage.inputTokens}，缓存 ${usage.cachedInputTokens}，输出 ${usage.outputTokens}`);
       } else {
         const cost = session?.totalCost || 0;
-        wsSend(ws, { type: 'system_message', message: `当前会话累计费用: $${cost.toFixed(4)}` });
+        sendSessionSystemMessage(ws, sessionId, `当前会话累计费用: $${cost.toFixed(4)}`);
       }
       break;
     }
 
     case '/compact': {
       if (!sessionId || !session) {
-        wsSend(ws, { type: 'system_message', message: '当前没有可压缩的会话。请先进入一个已进行过对话的会话后再执行 /compact。' });
+        sendSessionSystemMessage(ws, sessionId, '当前没有可压缩的会话。请先进入一个已进行过对话的会话后再执行 /compact。');
         break;
       }
       if (activeProcesses.has(sessionId)) {
-        wsSend(ws, { type: 'system_message', message: '当前会话正在处理中，请先等待完成或点击停止，再执行 /compact。' });
+        sendSessionSystemMessage(ws, sessionId, '当前会话正在处理中，请先等待完成或点击停止，再执行 /compact。');
         break;
       }
       const runtimeId = getRuntimeSessionId(session);
       if (!runtimeId) {
-        wsSend(ws, {
-          type: 'system_message',
-          message: agent === 'codex'
+        sendSessionSystemMessage(
+          ws,
+          sessionId,
+          agent === 'codex'
             ? '当前会话尚未建立 Codex 上下文，暂时无需压缩。'
             : '当前会话尚未建立 Claude 上下文，暂时无需压缩。',
-        });
+        );
         break;
       }
 
-      wsSend(ws, { type: 'system_message', message: compactStartMessage(agent) });
+      sendSessionSystemMessage(ws, sessionId, compactStartMessage(agent));
       pendingSlashCommands.set(session.id, { kind: 'compact' });
       handleMessage(ws, { text: '/compact', sessionId: session.id, mode: session.permissionMode || 'yolo' }, { hideInHistory: true });
       break;
@@ -2884,14 +3049,14 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
 
     case '/init': {
       if (!sessionId || !session) {
-        wsSend(ws, { type: 'system_message', message: '请先进入一个会话后再执行 /init。' });
+        sendSessionSystemMessage(ws, sessionId, '请先进入一个会话后再执行 /init。');
         break;
       }
       if (activeProcesses.has(sessionId)) {
-        wsSend(ws, { type: 'system_message', message: '当前会话正在处理中，请先等待完成或点击停止。' });
+        sendSessionSystemMessage(ws, sessionId, '当前会话正在处理中，请先等待完成或点击停止。');
         break;
       }
-      wsSend(ws, { type: 'system_message', message: initStartMessage(agent) });
+      sendSessionSystemMessage(ws, sessionId, initStartMessage(agent));
       pendingSlashCommands.set(session.id, { kind: 'init' });
       handleMessage(ws, {
         text: agent === 'codex' ? buildCodexInitPrompt(session.cwd) : '/init',
@@ -2903,11 +3068,11 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
 
     case '/github': {
       if (!sessionId || !session) {
-        wsSend(ws, { type: 'system_message', message: '请先进入一个会话后再执行 /github。' });
+        sendSessionSystemMessage(ws, sessionId, '请先进入一个会话后再执行 /github。');
         break;
       }
       if (activeProcesses.has(sessionId)) {
-        wsSend(ws, { type: 'system_message', message: '当前会话正在处理中，请先等待完成或点击停止。' });
+        sendSessionSystemMessage(ws, sessionId, '当前会话正在处理中，请先等待完成或点击停止。');
         break;
       }
       const ghArgs = parts.slice(1).join(' ').trim() || '列出所有可用仓库';
@@ -2933,11 +3098,11 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
 
     case '/ssh': {
       if (!sessionId || !session) {
-        wsSend(ws, { type: 'system_message', message: '请先进入一个会话后再执行 /ssh。' });
+        sendSessionSystemMessage(ws, sessionId, '请先进入一个会话后再执行 /ssh。');
         break;
       }
       if (activeProcesses.has(sessionId)) {
-        wsSend(ws, { type: 'system_message', message: '当前会话正在处理中，请先等待完成或点击停止。' });
+        sendSessionSystemMessage(ws, sessionId, '当前会话正在处理中，请先等待完成或点击停止。');
         break;
       }
       const sshArgs = parts.slice(1).join(' ').trim() || '列出所有可用主机';
@@ -2969,7 +3134,7 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
 		      const MODE_DESC = { default: '默认（需权限审批，受限操作）', plan: 'Plan（需确认计划后执行）', yolo: 'YOLO（跳过所有权限检查）' };
 		      if (!modeInput) {
 		        const cur = session?.permissionMode || 'yolo';
-		        wsSend(ws, { type: 'system_message', message: `当前模式: ${MODE_DESC[cur] || cur}\n可选: default, plan, yolo` });
+		        sendSessionSystemMessage(ws, sessionId, `当前模式: ${MODE_DESC[cur] || cur}\n可选: default, plan, yolo`);
 		      } else if (VALID_MODES.includes(modeInput.toLowerCase())) {
 		        const mode = modeInput.toLowerCase();
 		        if (session) {
@@ -2978,10 +3143,10 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
 		          session.updated = new Date().toISOString();
 		          saveSession(session);
 		        }
-		        wsSend(ws, { type: 'system_message', message: `权限模式已切换为: ${MODE_DESC[mode]}` });
-		        wsSend(ws, { type: 'mode_changed', mode });
+		        sendSessionSystemMessage(ws, sessionId, `权限模式已切换为: ${MODE_DESC[mode]}`);
+		        wsSend(ws, withOptionalSessionId(sessionId, { type: 'mode_changed', mode }));
 		      } else {
-	        wsSend(ws, { type: 'system_message', message: `无效模式: ${modeInput}\n可选: default, plan, yolo` });
+	        sendSessionSystemMessage(ws, sessionId, `无效模式: ${modeInput}\n可选: default, plan, yolo`);
       }
       break;
     }
@@ -2994,17 +3159,18 @@ function handleSlashCommand(ws, text, sessionId, fallbackAgent) {
         '/github [指令] — GitHub 操作（读取开发者配置后执行）\n' +
         '/ssh [指令] — SSH 远程操作（读取开发者配置后执行）\n' +
         '/help — 显示本帮助';
-      wsSend(ws, {
-        type: 'system_message',
-        message: agent === 'codex'
+      sendSessionSystemMessage(
+        ws,
+        sessionId,
+        agent === 'codex'
           ? base + '\n/model [名称] — 查看/切换 Codex 模型（自由输入）\n/compact — 执行 Codex /compact 压缩上下文\n/init — 分析项目并生成/更新 AGENTS.md'
           : base + '\n/model [名称] — 查看/切换模型（opus, sonnet, haiku）\n/compact — 执行 Claude 原生上下文压缩（保留压缩计划并可自动续跑）\n/init — 分析项目并生成/更新 CLAUDE.md',
-      });
+      );
       break;
     }
 
     default:
-      wsSend(ws, { type: 'system_message', message: `未知指令: ${cmd}\n输入 /help 查看可用指令` });
+      sendSessionSystemMessage(ws, sessionId, `未知指令: ${cmd}\n输入 /help 查看可用指令`);
   }
 }
 
@@ -3068,6 +3234,7 @@ function handleNewSession(ws, msg) {
     totalCost: 0,
     totalUsage: session.totalUsage,
     lastUsage: session.lastUsage || null,
+    contextWindowTokens: session.contextWindowTokens || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
@@ -3110,17 +3277,21 @@ function handleNewSession(ws, msg) {
 function handleLoadSession(ws, sessionId, requestId = '') {
   const session = loadSession(sessionId);
   if (!session) {
-    return wsSend(ws, { type: 'error', message: 'Session not found' });
+    return wsSend(ws, { type: 'error', requestId, sessionId, message: 'Session not found' });
   }
-  if (getSessionAgent(session) === 'claude' && !session.cwd && session.claudeSessionId) {
+  if (getSessionAgent(session) === 'claude' && session.claudeSessionId) {
     const localMeta = resolveClaudeSessionLocalMeta(session.claudeSessionId);
-    if (localMeta?.cwd) {
+    if (!session.cwd && localMeta?.cwd) {
       session.cwd = localMeta.cwd;
       if (!session.importedFrom && localMeta.projectDir) session.importedFrom = localMeta.projectDir;
       saveSession(session);
     }
+    backfillClaudeSessionTelemetry(session, localMeta);
   }
-  const { recentMessages, olderChunks } = splitHistoryMessages(session.messages);
+  if (getSessionAgent(session) === 'codex' && session.codexThreadId) {
+    backfillCodexSessionTelemetry(session);
+  }
+  const historyState = buildLazyHistoryState(session.messages);
   const effectiveCwd = session.cwd || activeProcesses.get(sessionId)?.cwd || null;
   if (effectiveCwd && !session.cwd) session.cwd = effectiveCwd;
 
@@ -3142,7 +3313,7 @@ function handleLoadSession(ws, sessionId, requestId = '') {
 	    type: 'session_info',
 	    requestId,
 	    sessionId: session.id,
-    messages: recentMessages,
+    messages: historyState.recentMessages,
     title: session.title,
     mode: session.permissionMode || 'yolo',
     model: sessionModelLabel(session),
@@ -3153,28 +3324,19 @@ function handleLoadSession(ws, sessionId, requestId = '') {
 	    totalCost: session.totalCost || 0,
 	    totalUsage: session.totalUsage || null,
       lastUsage: session.lastUsage || null,
+      contextWindowTokens: session.contextWindowTokens || null,
       workspaceStatus: buildWorkspaceStatus(session),
-	    historyTotal: session.messages.length,
-    historyBuffered: recentMessages.length,
-    historyPending: olderChunks.length > 0,
+	    historyTotal: historyState.historyTotal,
+    historyBuffered: historyState.historyBuffered,
+    historyCursor: historyState.historyCursor,
+    historyComplete: historyState.historyComplete,
+    historyPending: false,
     updated: session.updated,
     isRunning: activeProcesses.has(sessionId),
     taskMode: session.taskMode || 'local',
     sshHostId: session.sshHostId || '',
     remoteCwd: session.remoteCwd || '',
   });
-
-  if (olderChunks.length > 0) {
-    olderChunks.forEach((chunk, index) => {
-	      wsSend(ws, {
-	        type: 'session_history_chunk',
-	        requestId,
-	        sessionId: session.id,
-        messages: chunk,
-        remaining: Math.max(0, olderChunks.length - index - 1),
-      });
-    });
-  }
 
   // Resume streaming if process is still active
   if (activeProcesses.has(sessionId)) {
@@ -3194,6 +3356,29 @@ function handleLoadSession(ws, sessionId, requestId = '') {
       assistantSegments: entry.assistantSegments || [],
     });
   }
+}
+
+function handleLoadSessionHistoryChunk(ws, msg) {
+  const sessionId = String(msg?.sessionId || '').trim();
+  const requestId = String(msg?.requestId || '').trim();
+  const historyCursor = Number(msg?.historyCursor || 0);
+  const session = loadSession(sessionId);
+  if (!session) {
+    return wsSend(ws, { type: 'error', requestId, sessionId, message: 'Session not found' });
+  }
+  const chunkState = sliceSessionHistoryChunk(session.messages, historyCursor);
+  wsSend(ws, {
+    type: 'session_history_chunk',
+    requestId,
+    sessionId: session.id,
+    messages: chunkState.messages,
+    historyCursor: chunkState.historyCursor,
+    historyBuffered: chunkState.historyBuffered,
+    historyTotal: chunkState.historyTotal,
+    historyComplete: chunkState.historyComplete,
+    historyPending: false,
+    remaining: chunkState.remaining,
+  });
 }
 
 function sqlQuote(value) {
@@ -3264,6 +3449,7 @@ function handleDeleteSession(ws, sessionId) {
     const entry = activeProcesses.get(sessionId);
     try { killProcess(entry.pid); } catch {}
     if (entry.tailer) entry.tailer.stop();
+    if (entry.codexRolloutTailer) entry.codexRolloutTailer.stop();
     activeProcesses.delete(sessionId);
     if (entry.ws) wsSend(entry.ws, { type: 'done', sessionId });
   }
@@ -3317,7 +3503,7 @@ function handleRenameSession(ws, sessionId, title) {
 		      saveSession(session);
 		    }
 		  }
-		  wsSend(ws, { type: 'mode_changed', mode });
+		  wsSend(ws, withOptionalSessionId(sessionId, { type: 'mode_changed', mode }));
 		}
 
 function handleDisconnect(ws, wsId) {
@@ -3366,7 +3552,7 @@ function handleMessage(ws, msg, options = {}) {
   const normalizedText = textValue.trim();
   const resolvedAttachments = resolveMessageAttachments(attachments);
   if (attachments.length > 0 && resolvedAttachments.length === 0) {
-    return wsSend(ws, { type: 'error', message: '图片附件已过期或不可用，请重新上传后再发送。' });
+    return sendSessionError(ws, sessionId, '图片附件已过期或不可用，请重新上传后再发送。');
   }
   if (!normalizedText && resolvedAttachments.length === 0) return;
 
@@ -3382,7 +3568,7 @@ function handleMessage(ws, msg, options = {}) {
   }));
 
   if (sessionId && activeProcesses.has(sessionId)) {
-    return wsSend(ws, { type: 'error', message: '正在处理中，请先点击停止按钮。' });
+    return sendSessionError(ws, sessionId, '正在处理中，请先点击停止按钮。');
   }
 
   const derivedTitle = normalizedText
@@ -3417,7 +3603,7 @@ function handleMessage(ws, msg, options = {}) {
   normalizeSession(session);
 
   if (normalizedText.startsWith('/') && resolvedAttachments.length > 0) {
-    return wsSend(ws, { type: 'error', message: '命令消息暂不支持同时附带图片。请先发送图片说明，再单独使用 /model 或 /mode。' });
+    return sendSessionError(ws, sessionId, '命令消息暂不支持同时附带图片。请先发送图片说明，再单独使用 /model 或 /mode。');
   }
 
   if (mode && ['default', 'plan', 'yolo'].includes(mode)) {
@@ -3464,6 +3650,7 @@ function handleMessage(ws, msg, options = {}) {
       totalCost: session.totalCost || 0,
       totalUsage: session.totalUsage || null,
       lastUsage: session.lastUsage || null,
+      contextWindowTokens: session.contextWindowTokens || null,
       workspaceStatus: buildWorkspaceStatus(session),
       updated: session.updated,
       hasUnread: false,
@@ -3480,7 +3667,7 @@ function handleMessage(ws, msg, options = {}) {
     ? buildClaudeSpawnSpec(session, { attachments: resolvedAttachments })
     : buildCodexSpawnSpec(session, { attachments: resolvedAttachments });
   if (spawnSpec?.error) {
-    return wsSend(ws, { type: 'error', message: spawnSpec.error });
+    return sendSessionError(ws, currentSessionId, spawnSpec.error);
   }
   saveSession(session);
 
@@ -3523,6 +3710,7 @@ function handleMessage(ws, msg, options = {}) {
   const errorFd = fs.openSync(errorPath, 'w');
 
   let proc;
+  let entry = null;
   try {
     let stdinSource;
     if (useStreamJson) {
@@ -3551,41 +3739,14 @@ function handleMessage(ws, msg, options = {}) {
     cleanRunDir(currentSessionId);
     plog('ERROR', 'process_spawn_fail', { sessionId: currentSessionId.slice(0, 8), error: err.message });
     const agent = getSessionAgent(session);
-    return wsSend(ws, { type: 'error', message: formatRuntimeError(agent, err.message, { exitCode: null, signal: null }) });
+    return wsSend(ws, { type: 'error', sessionId: currentSessionId, message: formatRuntimeError(agent, err.message, { exitCode: null, signal: null }) });
   }
 
   fs.closeSync(outputFd);
   fs.closeSync(errorFd);
 
-  fs.writeFileSync(path.join(dir, 'pid'), String(proc.pid));
-  proc.unref(); // Process survives Node.js exit
-
-  plog('INFO', 'process_spawn', {
-    sessionId: currentSessionId.slice(0, 8),
-    pid: proc.pid,
-    agent: getSessionAgent(session),
-    mode: spawnSpec.mode,
-    model: session.model || 'default',
-    resume: spawnSpec.resume,
-    codexHomeDir: spawnSpec.codexHomeDir || null,
-    codexRuntimeKey: spawnSpec.codexRuntimeKey || null,
-    args: spawnSpec.args.join(' '),
-  });
-
-  // Fast exit detection (while Node.js is running)
-  proc.on('exit', (code, signal) => {
-    plog('INFO', 'process_exit_event', {
-      sessionId: currentSessionId.slice(0, 8),
-      pid: proc.pid,
-      exitCode: code,
-      signal: signal,
-    });
-    // Small delay to ensure file is fully flushed
-    setTimeout(() => handleProcessComplete(currentSessionId, code, signal), 300);
-  });
-
-  const entry = {
-    pid: proc.pid,
+  entry = {
+    pid: proc.pid || null,
     ws,
     agent: getSessionAgent(session),
     cwd: spawnSpec.cwd,
@@ -3600,7 +3761,56 @@ function handleMessage(ws, msg, options = {}) {
     codexRuntimeKey: spawnSpec.codexRuntimeKey || '',
     assistantSegments: [],
     tailer: null,
+    codexRolloutTailer: null,
+    codexRolloutLookupNextAt: 0,
+    codexRolloutPath: '',
   };
+  proc.once('error', (err) => {
+    activeProcesses.delete(currentSessionId);
+    if (entry?.tailer) entry.tailer.stop();
+    if (entry?.codexRolloutTailer) entry.codexRolloutTailer.stop();
+    cleanRunDir(currentSessionId);
+    plog('ERROR', 'process_spawn_fail', {
+      sessionId: currentSessionId.slice(0, 8),
+      error: err.message,
+      agent: getSessionAgent(session),
+      mode: spawnSpec.mode,
+    });
+    wsSend(ws, {
+      type: 'error',
+      sessionId: currentSessionId,
+      message: formatRuntimeError(getSessionAgent(session), err.message, { exitCode: null, signal: null }),
+    });
+    sendSessionList(ws);
+  });
+  if (proc.pid) {
+    fs.writeFileSync(path.join(dir, 'pid'), String(proc.pid));
+  }
+  proc.unref(); // Process survives Node.js exit
+
+  plog('INFO', 'process_spawn', {
+    sessionId: currentSessionId.slice(0, 8),
+    pid: proc.pid || null,
+    agent: getSessionAgent(session),
+    mode: spawnSpec.mode,
+    model: session.model || 'default',
+    resume: spawnSpec.resume,
+    codexHomeDir: spawnSpec.codexHomeDir || null,
+    codexRuntimeKey: spawnSpec.codexRuntimeKey || null,
+    args: spawnSpec.args.join(' '),
+  });
+
+  // Fast exit detection (while Node.js is running)
+  proc.on('exit', (code, signal) => {
+    plog('INFO', 'process_exit_event', {
+      sessionId: currentSessionId.slice(0, 8),
+      pid: proc.pid || null,
+      exitCode: code,
+      signal: signal,
+    });
+    // Small delay to ensure file is fully flushed
+    setTimeout(() => handleProcessComplete(currentSessionId, code, signal), 300);
+  });
   activeProcesses.set(currentSessionId, entry);
   sendSessionList(ws);
 
@@ -3609,9 +3819,11 @@ function handleMessage(ws, msg, options = {}) {
     try {
       const event = JSON.parse(line);
       processRuntimeEvent(entry, event, currentSessionId);
+      maybeAttachCodexRolloutTailer(entry, currentSessionId, event.thread_id || '');
     } catch {}
   });
   entry.tailer.start();
+  maybeAttachCodexRolloutTailer(entry, currentSessionId, '');
 }
 
 function truncateObj(obj, maxLen) {
@@ -3648,6 +3860,7 @@ const {
   buildCodexSpawnSpec,
   processClaudeEvent,
   processCodexEvent,
+  processCodexRolloutEntry,
   processRuntimeEvent,
 } = createAgentRuntime({
   processEnv: process.env,
@@ -3757,54 +3970,81 @@ function resolveClaudeSessionLocalMeta(claudeSessionId) {
   return null;
 }
 
-function parseJsonlToMessages(lines) {
-  const messages = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let entry;
-    try { entry = JSON.parse(trimmed); } catch { continue; }
-    if (entry.type === 'user') {
-      const raw = entry.message?.content;
-      let content = '';
-      if (typeof raw === 'string') {
-        content = raw;
-      } else if (Array.isArray(raw)) {
-        // skip tool_result blocks, only take text blocks
-        content = raw
-          .filter(b => b.type === 'text')
-          .map(b => b.text || '')
-          .join('');
-      }
-      if (content.trim()) {
-        messages.push({ role: 'user', content, timestamp: entry.timestamp || null });
-      }
-    } else if (entry.type === 'assistant') {
-      const blocks = entry.message?.content;
-      if (!Array.isArray(blocks)) continue;
-      let content = '';
-      const toolCalls = [];
-      for (const b of blocks) {
-        if (b.type === 'text' && b.text) {
-          content += b.text;
-        } else if (b.type === 'tool_use') {
-          toolCalls.push({ name: b.name, id: b.id, input: b.input, done: true });
-        }
-        // skip thinking blocks
-      }
-      if (content.trim() || toolCalls.length > 0) {
-        messages.push({ role: 'assistant', content, toolCalls, timestamp: entry.timestamp || null });
-      }
-    }
-    // skip other types
+function backfillClaudeSessionTelemetry(session, localMeta = null) {
+  if (!session || getSessionAgent(session) !== 'claude' || !session.claudeSessionId) return false;
+  const resolvedMeta = localMeta || resolveClaudeSessionLocalMeta(session.claudeSessionId);
+  if (!resolvedMeta?.filePath) return false;
+  const totalUsage = session.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+  const hasUsageSnapshot = !!session.lastUsage;
+  const hasAnyTotals = Number(totalUsage.inputTokens || 0) > 0
+    || Number(totalUsage.cachedInputTokens || 0) > 0
+    || Number(totalUsage.outputTokens || 0) > 0;
+  if (hasUsageSnapshot && hasAnyTotals) return false;
+  try {
+    const parsed = parseClaudeTranscriptLines(fs.readFileSync(resolvedMeta.filePath, 'utf8').split('\n'));
+    session.totalUsage = parsed.totalUsage || totalUsage;
+    if (parsed.lastUsage) session.lastUsage = parsed.lastUsage;
+    if (!session.cwd && resolvedMeta.cwd) session.cwd = resolvedMeta.cwd;
+    if (!session.importedFrom && resolvedMeta.projectDir) session.importedFrom = resolvedMeta.projectDir;
+    saveSession(session);
+    return true;
+  } catch {
+    return false;
   }
-  return messages;
+}
+
+function resolveCodexRolloutPathForSession(session) {
+  if (!session || getSessionAgent(session) !== 'codex' || !session.codexThreadId) return '';
+  if (session.codexHomeDir) {
+    const localPath = findCodexRolloutPath(session.codexHomeDir, session.codexThreadId);
+    if (localPath) return localPath;
+  }
+  const requestedPath = String(session.importedRolloutPath || '').trim();
+  if (requestedPath && fs.existsSync(requestedPath)) return path.resolve(requestedPath);
+  return findCodexRolloutPathByThreadId(session.codexThreadId);
+}
+
+function backfillCodexSessionTelemetry(session) {
+  if (!session || getSessionAgent(session) !== 'codex' || !session.codexThreadId) return false;
+  const rolloutPath = resolveCodexRolloutPathForSession(session);
+  if (!rolloutPath) return false;
+  const parsed = parseCodexRolloutFile(rolloutPath);
+  if (!parsed || parsed.meta?.threadId !== session.codexThreadId) return false;
+
+  const before = JSON.stringify({
+    model: session.model || '',
+    reasoningEffort: session.reasoningEffort || '',
+    totalUsage: session.totalUsage || null,
+    lastUsage: session.lastUsage || null,
+    contextWindowTokens: session.contextWindowTokens || null,
+    importedRolloutPath: session.importedRolloutPath || '',
+    cwd: session.cwd || null,
+  });
+
+  applyCodexParsedTelemetryToSession(session, parsed, rolloutPath);
+  if (!session.cwd && parsed.meta?.cwd) session.cwd = parsed.meta.cwd;
+
+  const after = JSON.stringify({
+    model: session.model || '',
+    reasoningEffort: session.reasoningEffort || '',
+    totalUsage: session.totalUsage || null,
+    lastUsage: session.lastUsage || null,
+    contextWindowTokens: session.contextWindowTokens || null,
+    importedRolloutPath: session.importedRolloutPath || '',
+    cwd: session.cwd || null,
+  });
+
+  if (before === after) return false;
+  saveSession(session);
+  return true;
 }
 
 const {
   parseCodexRolloutLines,
   getCodexRolloutFiles,
   getImportedCodexThreadIds,
+  listCodexSessions,
+  findCodexRolloutPathByThreadId,
   parseCodexRolloutFile,
 } = createCodexRolloutStore({
   codexSessionsDir: CODEX_SESSIONS_DIR,
@@ -3897,7 +4137,8 @@ function handleImportNativeSession(ws, msg) {
     return wsSend(ws, { type: 'error', message: '无法读取会话文件' });
   }
   const lines = content.split('\n');
-  const messages = parseJsonlToMessages(lines);
+  const parsedClaude = parseClaudeTranscriptLines(lines);
+  const messages = parsedClaude.messages;
 
   // Find or create cc-web session with this claudeSessionId
   let existingSession = null;
@@ -3910,24 +4151,9 @@ function handleImportNativeSession(ws, msg) {
     }
   } catch {}
 
-  // Determine title and cwd from messages/raw
-  let title = sessionId.slice(0, 20);
-  let cwd = null;
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const e = JSON.parse(t);
-      if (e.type === 'user') {
-        if (!cwd) cwd = e.cwd || null;
-        const raw = e.message?.content;
-        let text = '';
-        if (typeof raw === 'string') text = raw;
-        else if (Array.isArray(raw)) text = raw.filter(b => b.type === 'text').map(b => b.text || '').join('');
-        if (text.trim()) { title = text.trim().slice(0, 60).replace(/\n/g, ' '); break; }
-      }
-    } catch {}
-  }
+  // Determine title and cwd from parsed transcript metadata
+  const title = parsedClaude.meta.title || sessionId.slice(0, 20);
+  const cwd = parsedClaude.meta.cwd || null;
 
   const id = existingSession ? existingSession.id : crypto.randomUUID();
   const session = {
@@ -3942,17 +4168,18 @@ function handleImportNativeSession(ws, msg) {
     model: existingSession?.model || null,
     permissionMode: existingSession?.permissionMode || 'yolo',
     totalCost: existingSession?.totalCost || 0,
-    totalUsage: existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
-    lastUsage: existingSession?.lastUsage || null,
+    totalUsage: parsedClaude.totalUsage || existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    lastUsage: parsedClaude.lastUsage || existingSession?.lastUsage || null,
     messages,
     cwd: cwd || existingSession?.cwd || null,
   };
   saveSession(session);
   wsSessionMap.set(ws, id);
+  const historyState = buildLazyHistoryState(session.messages);
   wsSend(ws, {
     type: 'session_info',
     sessionId: id,
-    messages: session.messages,
+    messages: historyState.recentMessages,
     title: session.title,
     mode: session.permissionMode,
     model: sessionModelLabel(session),
@@ -3962,9 +4189,14 @@ function handleImportNativeSession(ws, msg) {
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
     lastUsage: session.lastUsage || null,
+    contextWindowTokens: session.contextWindowTokens || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
+    historyTotal: historyState.historyTotal,
+    historyBuffered: historyState.historyBuffered,
+    historyCursor: historyState.historyCursor,
+    historyComplete: historyState.historyComplete,
     historyPending: false,
     isRunning: false,
     taskMode: session.taskMode || 'local',
@@ -3976,25 +4208,10 @@ function handleImportNativeSession(ws, msg) {
 
 function handleListCodexSessions(ws) {
   const imported = getImportedCodexThreadIds();
-  const items = [];
-  const seen = new Set();
-  for (const filePath of getCodexRolloutFiles()) {
-    const parsed = parseCodexRolloutFile(filePath);
-    if (!parsed?.meta?.threadId) continue;
-    if (seen.has(parsed.meta.threadId)) continue;
-    seen.add(parsed.meta.threadId);
-    const title = parsed.meta.title || parsed.meta.threadId.slice(0, 20);
-    items.push({
-      threadId: parsed.meta.threadId,
-      title,
-      cwd: parsed.meta.cwd || null,
-      updatedAt: parsed.meta.updatedAt || null,
-      cliVersion: parsed.meta.cliVersion || '',
-      source: parsed.meta.source || '',
-      rolloutPath: filePath,
-      alreadyImported: imported.has(parsed.meta.threadId),
-    });
-  }
+  const items = listCodexSessions().map((item) => ({
+    ...item,
+    alreadyImported: imported.has(item.threadId),
+  }));
   wsSend(ws, { type: 'codex_sessions', sessions: items });
 }
 
@@ -4010,13 +4227,8 @@ function handleImportCodexSession(ws, msg) {
     parsed = parseCodexRolloutFile(requestedPath);
   }
   if (!parsed) {
-    for (const filePath of getCodexRolloutFiles()) {
-      const candidate = parseCodexRolloutFile(filePath);
-      if (candidate?.meta?.threadId === threadId) {
-        parsed = candidate;
-        break;
-      }
-    }
+    const resolvedPath = findCodexRolloutPathByThreadId(threadId);
+    if (resolvedPath) parsed = parseCodexRolloutFile(resolvedPath);
   }
 
   if (!parsed || parsed.meta.threadId !== threadId) {
@@ -4044,22 +4256,25 @@ function handleImportCodexSession(ws, msg) {
     codexThreadId: threadId,
     importedFrom: 'codex',
     importedRolloutPath: parsed.filePath,
-    model: parsed.meta.model || existingSession?.model || null,
-    reasoningEffort: parsed.meta.reasoningEffort || existingSession?.reasoningEffort || '',
+    model: existingSession?.model || null,
+    reasoningEffort: existingSession?.reasoningEffort || '',
     permissionMode: existingSession?.permissionMode || 'yolo',
     totalCost: existingSession?.totalCost || 0,
-    totalUsage: parsed.totalUsage || existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
-    lastUsage: parsed.lastUsage || existingSession?.lastUsage || null,
+    totalUsage: existingSession?.totalUsage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    lastUsage: existingSession?.lastUsage || null,
+    contextWindowTokens: existingSession?.contextWindowTokens || null,
     messages: parsed.messages,
     cwd: parsed.meta.cwd || existingSession?.cwd || null,
   };
+  applyCodexParsedTelemetryToSession(session, parsed, parsed.filePath);
 
   saveSession(session);
   wsSessionMap.set(ws, id);
+  const historyState = buildLazyHistoryState(session.messages);
   wsSend(ws, {
     type: 'session_info',
     sessionId: id,
-    messages: session.messages,
+    messages: historyState.recentMessages,
     title: session.title,
     mode: session.permissionMode,
     model: sessionModelLabel(session),
@@ -4069,9 +4284,14 @@ function handleImportCodexSession(ws, msg) {
     totalCost: session.totalCost || 0,
     totalUsage: session.totalUsage || null,
     lastUsage: session.lastUsage || null,
+    contextWindowTokens: session.contextWindowTokens || null,
     workspaceStatus: buildWorkspaceStatus(session),
     updated: session.updated,
     hasUnread: false,
+    historyTotal: historyState.historyTotal,
+    historyBuffered: historyState.historyBuffered,
+    historyCursor: historyState.historyCursor,
+    historyComplete: historyState.historyComplete,
     historyPending: false,
     isRunning: false,
     taskMode: session.taskMode || 'local',
@@ -4128,6 +4348,7 @@ function shutdown(reason, exitCode = 0) {
   try {
     for (const [, entry] of activeProcesses) {
       if (entry.tailer) entry.tailer.stop();
+      if (entry.codexRolloutTailer) entry.codexRolloutTailer.stop();
     }
   } catch {}
 

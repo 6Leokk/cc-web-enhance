@@ -1,9 +1,20 @@
-# CC-Web
+# CC-Web Enhance
 
-A lightweight browser interface for Claude Code and Codex, designed to keep each agent close to its native CLI workflow while sharing the same web shell.
+A lightweight enhanced browser interface for Claude Code and Codex, designed to keep each agent close to its native CLI workflow while sharing the same web shell.
 
 ![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=node.js&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-blue)
+![License](https://img.shields.io/badge/License-See%20NOTICE-lightgrey)
+
+[中文 README](./README.md) | [Notice](./NOTICE.md)
+
+This repository is an enhanced derivative of [ZgDaniel/cc-web](https://github.com/ZgDaniel/cc-web). It keeps the original lightweight Claude Code / Codex web workflow and adds reliability, refresh performance, Codex rollout telemetry, static asset delivery, and regression coverage improvements.
+
+## Source and License
+
+- Upstream project: [`ZgDaniel/cc-web`](https://github.com/ZgDaniel/cc-web)
+- Enhanced repository name: `cc-web-enhance`
+- This repository preserves upstream source attribution and acknowledgements. See [NOTICE.md](./NOTICE.md).
+- The upstream README displays an MIT badge, but GitHub license metadata currently does not expose a machine-readable upstream `LICENSE` file. This repository does not add a new license claim on top of upstream. Review and follow the latest upstream licensing statement before redistribution or derivative use.
 
 ## Screenshots
 
@@ -28,6 +39,7 @@ A lightweight browser interface for Claude Code and Codex, designed to keep each
 - **Multi-API switching**: configure multiple API profiles and switch between them instantly from the UI.
 - **Developer config**: save SSH host info (key/password auth) and GitHub tokens for quick remote host management and repository operations via `/ssh` and `/github` commands.
 - **Password-based auth**: initial password generation, forced first-login reset, and password change in Web UI.
+- **Enhanced reliability**: lazy session history, refresh caching, session-scoped events, Codex rollout parsing, and expanded regression coverage.
 
 ## Requirements
 
@@ -44,8 +56,8 @@ npm install -g @openai/codex
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/ZgDaniel/cc-web.git
-cd cc-web
+git clone https://github.com/6Leokk/cc-web-enhance.git
+cd cc-web-enhance
 npm install
 cp .env.example .env    # optional; if omitted, an initial password is auto-generated
 npm start
@@ -54,8 +66,8 @@ npm start
 ### Windows
 
 ```cmd
-git clone https://github.com/ZgDaniel/cc-web.git
-cd cc-web
+git clone https://github.com/6Leokk/cc-web-enhance.git
+cd cc-web-enhance
 npm install
 copy .env.example .env  & REM optional
 ```
@@ -182,19 +194,32 @@ tail -f logs/process.log | jq .
 
 ## Production Deployment
 
+Run verification before deployment:
+
+```bash
+npm run regression
+npm run regression:ui
+```
+
+Security notes:
+
+- Do not commit `.env`, `config/`, `sessions/`, `logs/`, `attachments/`, `.npmrc`, or private key files.
+- The default bind address is `127.0.0.1`. For remote access, prefer Tailscale, Cloudflare Tunnel, or an Nginx reverse proxy with restricted source IPs.
+- If you set `HOST=0.0.0.0` for LAN access, use a strong password and firewall rules that allow only trusted devices.
+
 ### systemd Service
 
-Create `/etc/systemd/system/cc-web.service`:
+Create `/etc/systemd/system/cc-web-enhance.service`:
 
 ```ini
 [Unit]
-Description=CC-Web - Claude Code Web Chat UI
+Description=CC-Web Enhance - Claude Code / Codex Web UI
 After=network.target
 
 [Service]
 Type=simple
 User=your-user
-WorkingDirectory=/path/to/cc-web
+WorkingDirectory=/path/to/cc-web-enhance
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
@@ -208,8 +233,10 @@ WantedBy=multi-user.target
 `KillMode=process` is important. It ensures systemd restart only stops Node.js, while Claude subprocesses continue and are reattached after recovery.
 
 ```bash
-sudo systemctl enable cc-web
-sudo systemctl start cc-web
+sudo systemctl daemon-reload
+sudo systemctl enable cc-web-enhance
+sudo systemctl start cc-web-enhance
+sudo systemctl status cc-web-enhance --no-pager -l
 ```
 
 ### Nginx Reverse Proxy
@@ -246,7 +273,7 @@ Use this mode when running CC-Web on a personal PC and controlling Claude / Code
 Start with `start.bat`, or run manually:
 
 ```cmd
-cd cc-web
+cd cc-web-enhance
 npm install
 node server.js
 ```

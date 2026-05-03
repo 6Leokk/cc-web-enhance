@@ -1,25 +1,34 @@
 {
-  "name": "cc-web",
+  "name": "cc-web-enhance",
   "version": "1.3.1",
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "regression": "node scripts/regression.js",
+    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/codex-stream-refresh-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js",
     "regression:assistant-mode": "node scripts/assistant-message-mode-regression.js",
     "regression:auth-ip": "node scripts/auth-ip-regression.js",
     "regression:codex-format": "node scripts/codex-message-format-regression.js",
     "regression:notify": "node scripts/notify-regression.js",
     "regression:notify-foreground": "node scripts/notify-foreground-regression.js",
+    "regression:foreground-refresh": "node scripts/foreground-session-refresh-regression.js",
+    "regression:foreground-restore": "node scripts/foreground-restore-regression.js",
     "regression:codex-stream-refresh": "node scripts/codex-stream-refresh-regression.js",
+    "regression:static-delivery": "node scripts/static-delivery-regression.js",
+    "regression:static-delivery-cache": "node scripts/static-delivery-cache-regression.js",
+    "regression:codex-rollout-cache": "node scripts/codex-rollout-cache-regression.js",
     "regression:harness": "node scripts/regression-harness-regression.js",
     "regression:process-completion": "node scripts/process-completion-regression.js",
+    "regression:spawn-error": "node scripts/spawn-error-regression.js",
+    "regression:context-telemetry": "node scripts/context-telemetry-regression.js",
+    "regression:lazy-history": "node scripts/lazy-history-regression.js",
     "regression:port-safety": "node scripts/port-safety-regression.js",
     "regression:sidebar-swipe": "node scripts/sidebar-swipe-regression.js",
     "regression:sqlite3-diagnostic": "node scripts/sqlite3-diagnostic-regression.js",
     "regression:markdown-security": "node scripts/markdown-security-regression.js",
     "regression:theme": "node scripts/theme-regression.js",
     "regression:mobile-scroll": "node scripts/mobile-scroll-regression.js",
-    "regression:ui": "node scripts/ui-regression.js"
+    "regression:ui": "node scripts/ui-regression.js",
+    "regression:session-navigation": "node scripts/session-navigation-state-regression.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

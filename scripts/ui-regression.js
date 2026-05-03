@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 const appJs = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const runtimeJs = fs.readFileSync(path.join(root, 'lib', 'agent-runtime.js'), 'utf8');
+const staticDeliveryJs = fs.readFileSync(path.join(root, 'lib', 'static-delivery.js'), 'utf8');
 const styleCss = readPublicCss(root);
 const indexHtml = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 
@@ -89,7 +90,7 @@ assert(
     /currentModel/.test(appJs) &&
     /currentCwd/.test(appJs) &&
     /workspaceStatus/.test(appJs),
-  'composer should expose a dedicated status line under the input with model cwd context and git data'
+  'composer should expose a dedicated status line under the input with model cwd total usage and git data'
 );
 assert(
   /workspaceStatus:\s*payload\.workspaceStatus\s*\?\s*deepClone\(payload\.workspaceStatus\)\s*:\s*null/.test(appJs) &&
@@ -99,10 +100,9 @@ assert(
 );
 assert(
   /function\s+resolveContextWindowTokens/.test(appJs) &&
-    /function\s+formatCurrentContextUsageText/.test(appJs) &&
     /function\s+formatTotalUsageText/.test(appJs) &&
     /function\s+formatWorkspaceGitText/.test(appJs),
-  'composer status line should format current context total usage and git status explicitly'
+  'runtime usage helpers should still expose context window resolution while the composer formats total usage and git status explicitly'
 );
 assert(
   /cwdDisplay/.test(serverJs) &&
@@ -116,12 +116,19 @@ assert(
     /type:\s*'usage'[\s\S]*lastUsage/.test(runtimeJs),
   'runtime usage updates should distinguish current-context usage from cumulative totals'
 );
-const currentContextFormatter = appJs.match(/function\s+formatCurrentContextUsageText\(\)\s*\{([\s\S]*?)\n\s*\}/);
-assert(currentContextFormatter, 'current context usage formatter should exist');
+const codexTurnCompletedHandler = runtimeJs.match(/case\s+'turn\.completed':[\s\S]*?break;\n\s*\}/);
+assert(codexTurnCompletedHandler, 'Codex turn.completed handler should exist');
 assert(
-  /currentLastUsage\.inputTokens/.test(currentContextFormatter[1]) &&
-    !/cachedInputTokens/.test(currentContextFormatter[1]),
-  'current context usage should use lastUsage.inputTokens only; cachedInputTokens is a subset, not an extra context count'
+  !/session\.lastUsage\s*=/.test(codexTurnCompletedHandler[0]) &&
+    !/entry\.lastUsage\s*=/.test(codexTurnCompletedHandler[0]) &&
+    !/lastUsage:\s*session\.lastUsage/.test(codexTurnCompletedHandler[0]),
+  'Codex turn.completed usage is cumulative telemetry and must not synthesize or stream context snapshots'
+);
+assert(
+  !/function\s+formatCurrentContextUsageText/.test(appJs) &&
+    !/composer-status-segment is-context/.test(appJs) &&
+    !/\.composer-status-segment\.is-context/.test(styleCss),
+  'composer status line should no longer render the unreliable current-context segment'
 );
 const totalUsageFormatter = appJs.match(/function\s+formatTotalUsageText\(\)\s*\{([\s\S]*?)\n\s*\}/);
 assert(totalUsageFormatter, 'total usage formatter should exist');
@@ -155,8 +162,8 @@ assert(
 assert(
   /if-none-match/i.test(serverJs) &&
     /ETag/.test(serverJs) &&
-    /max-age=31536000|must-revalidate/.test(serverJs) &&
-    /index\.html/.test(serverJs),
+    (/max-age=31536000|must-revalidate/.test(serverJs) || /must-revalidate/.test(staticDeliveryJs)) &&
+    (/index\.html/.test(serverJs) || /index\.html/.test(staticDeliveryJs)),
   'static asset delivery should distinguish shell caching from local asset validation'
 );
 assert(

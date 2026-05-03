@@ -107,6 +107,21 @@ assert(layoutCss.includes('var(--panel-surface-bg)'), 'layout CSS should consume
 assert(layoutCss.includes('var(--sidebar-surface-bg)'), 'layout CSS should consume sidebar surface tokens');
 assert(layoutCss.includes('var(--session-item-hover-bg)'), 'layout CSS should consume session item tokens');
 assert(layoutCss.includes('var(--chat-control-bg)'), 'layout CSS should consume chat control tokens');
+assert(
+  layoutCss.includes('.chat-title.is-editing') &&
+    layoutCss.includes('var(--input-surface-bg)') &&
+    layoutCss.includes('var(--input-surface-border)'),
+  'chat title edit state should use themed input surface tokens',
+);
 assert(inputCss.includes('var(--input-surface-bg)'), 'input/overlay CSS should consume input surface tokens');
+assert(
+  !appJs.includes("chatTitle.style.background = '#fff';"),
+  'chat title edit mode should not hard-code a white background',
+);
+assert(
+  appJs.includes("chatTitle.classList.add('is-editing')") &&
+    appJs.includes("chatTitle.classList.remove('is-editing')"),
+  'chat title edit mode should toggle a dedicated CSS class',
+);
 
 console.log('theme regression checks passed');
