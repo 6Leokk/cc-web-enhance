@@ -1,0 +1,18 @@
+# frps example for cc-web-enhance.
+# Replace placeholders before use. Do not commit real tokens.
+
+bindPort = 7000
+
+auth.method = "token"
+auth.token = "YOUR_FRP_TOKEN"
+
+# Optional HTTP virtual host mode. Keep disabled unless you need domain routing.
+# vhostHTTPPort = 8080
+
+# Dashboard is intentionally disabled by default.
+# Do not add dashboardPort/dashboardUser/dashboardPwd unless it is protected by
+# firewall rules and strong credentials.
+
+# Firewall recommendation:
+# - Allow only bindPort from trusted networks where possible.
+# - If vhostHTTPPort is enabled, put HTTPS and access control in front of it.

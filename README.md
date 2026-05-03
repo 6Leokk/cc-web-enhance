@@ -72,7 +72,13 @@ copy .env.example .env  & REM 可选
 
 ---
 
-启动后访问 `http://localhost:8002`，输入密码即可使用。
+启动后访问 `http://127.0.0.1:8083`，输入密码即可使用。
+
+## 内网远程访问 / frp 部署
+
+默认服务仍只监听 `127.0.0.1:8083`。需要从公网安全访问内网机器时，推荐使用 frp 把公网入口转发到内网机器的本地地址，不要把 cc-web 默认改成公网监听。
+
+详细步骤见 [frp 部署说明](./docs/deploy-frp.md)，架构与替代方案见 [内网远程访问设计](./docs/intranet-access-design.md)。
 
 ## 配置
 
@@ -81,8 +87,10 @@ copy .env.example .env  & REM 可选
 | 变量 | 必填 | 默认值 | 说明 |
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | 否 | 自动生成 | Web 登录密码（首次启动自动迁移到 `config/auth.json`） |
-| `PORT` | 否 | `8002` | 服务监听端口 |
-| `HOST` | 否 | `127.0.0.1` | 服务监听地址；局域网访问可设为 `0.0.0.0` |
+| `CC_WEB_PORT` | 否 | `8083` | 服务监听端口 |
+| `CC_WEB_HOST` | 否 | `127.0.0.1` | 服务监听地址；frp 模式建议保持默认 |
+| `PORT` | 否 | - | 兼容旧变量；`CC_WEB_PORT` 优先 |
+| `HOST` | 否 | - | 兼容旧变量；`CC_WEB_HOST` 优先 |
 | `CLAUDE_PATH` | 否 | `claude` | Claude CLI 可执行文件路径 |
 | `CODEX_PATH` | 否 | `codex` | Codex CLI 可执行文件路径 |
 | `CC_WEB_CONFIG_DIR` | 否 | `./config` | 配置目录覆写（主要供隔离测试使用） |
@@ -207,8 +215,8 @@ npm run regression:ui
 安全注意：
 
 - 不要提交 `.env`、`config/`、`sessions/`、`logs/`、`attachments/`、`.npmrc` 或私钥文件。
-- 默认只监听 `127.0.0.1`。需要公网访问时，优先使用 Tailscale、Cloudflare Tunnel 或 Nginx 反向代理，并限制来源 IP。
-- 如果使用 `HOST=0.0.0.0` 暴露到局域网，请确认密码足够强，且防火墙只允许可信设备访问。
+- 默认只监听 `127.0.0.1:8083`。需要公网访问时，优先使用 frp、Tailscale、Cloudflare Tunnel 或 Nginx 反向代理，并限制来源 IP。
+- 不建议把 cc-web 直接改成 `0.0.0.0`。如果用户显式这样做，必须确认密码足够强，且防火墙只允许可信设备访问。
 
 ### systemd 服务
 
@@ -253,7 +261,7 @@ server {
     ssl_certificate_key /path/to/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8002;
+        proxy_pass http://127.0.0.1:8083;
         proxy_http_version 1.1;
 
         # WebSocket 支持
@@ -282,11 +290,10 @@ node server.js
 
 **局域网访问**（手机和电脑在同一 WiFi）：
 - 出于安全考虑，CC-Web 默认只监听 `127.0.0.1`，推荐通过 Nginx 等反向代理、Tailscale 或 Cloudflare Tunnel 暴露访问入口，并配合防火墙限制来源。
-- 确需在局域网内使用，可在 `.env` 设置 `HOST=0.0.0.0`，再通过 `http://电脑局域网IP:8002` 访问。
+- 确需在局域网内使用，可显式设置 `CC_WEB_HOST=0.0.0.0`，但更推荐按 [frp 部署说明](./docs/deploy-frp.md) 保持 `127.0.0.1:8083` 并通过受控入口访问。
 
 **远程访问**（外出时用手机控制家里电脑）：
-- 推荐使用 [Tailscale](https://tailscale.com/) — 电脑和手机各安装一个，自动组网，免费够用
-- 或使用 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)（需域名）
+- 推荐使用 [frp 部署说明](./docs/deploy-frp.md) 中的 frp 方案，或使用 Tailscale / Cloudflare Tunnel 等受控隧道方案。
 
 
 ## 更新记录

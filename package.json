@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/codex-stream-refresh-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js",
+    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/codex-stream-refresh-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js && node scripts/intranet-frp-safety-regression.js",
     "regression:assistant-mode": "node scripts/assistant-message-mode-regression.js",
     "regression:auth-ip": "node scripts/auth-ip-regression.js",
     "regression:codex-format": "node scripts/codex-message-format-regression.js",
@@ -19,6 +19,7 @@
     "regression:harness": "node scripts/regression-harness-regression.js",
     "regression:process-completion": "node scripts/process-completion-regression.js",
     "regression:spawn-error": "node scripts/spawn-error-regression.js",
+    "regression:intranet-frp": "node scripts/intranet-frp-safety-regression.js",
     "regression:context-telemetry": "node scripts/context-telemetry-regression.js",
     "regression:lazy-history": "node scripts/lazy-history-regression.js",
     "regression:port-safety": "node scripts/port-safety-regression.js",

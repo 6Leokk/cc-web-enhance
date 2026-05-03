@@ -16,10 +16,10 @@
 - Create: `scripts/intranet-frp-safety-regression.js`
 - Modify: `package.json`
 
-- [ ] **Step 1: Write the failing test**
-- [ ] **Step 2: Run test to verify it fails**
-- [ ] **Step 3: Write minimal implementation**
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 1: Write the failing test**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Write minimal implementation**
+- [x] **Step 4: Run test to verify it passes**
 - [ ] **Step 5: Commit**
 
 ### Task 2: Implement bind resolution
@@ -28,10 +28,10 @@
 - Create: `lib/server-config.js`
 - Modify: `server.js`
 
-- [ ] **Step 1: Write the failing test**
-- [ ] **Step 2: Run test to verify it fails**
-- [ ] **Step 3: Write minimal implementation**
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 1: Write the failing test**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Write minimal implementation**
+- [x] **Step 4: Run test to verify it passes**
 - [ ] **Step 5: Commit**
 
 ### Task 3: Add frp deployment assets
@@ -44,10 +44,10 @@
 - Create: `scripts/frp/check-local-cc-web.sh`
 - Create: `scripts/frp/README.md`
 
-- [ ] **Step 1: Write the failing test**
-- [ ] **Step 2: Run test to verify it fails**
-- [ ] **Step 3: Write minimal implementation**
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 1: Write the failing test**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Write minimal implementation**
+- [x] **Step 4: Run test to verify it passes**
 - [ ] **Step 5: Commit**
 
 ### Task 4: Update docs and README
@@ -59,10 +59,10 @@
 - Create: `docs/deploy-frp.md`
 - Create: `docs/security/intranet-access-threat-model.md`
 
-- [ ] **Step 1: Write the failing test**
-- [ ] **Step 2: Run test to verify it fails**
-- [ ] **Step 3: Write minimal implementation**
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 1: Write the failing test**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Write minimal implementation**
+- [x] **Step 4: Run test to verify it passes**
 - [ ] **Step 5: Commit**
 
 ### Task 5: Verification and release prep

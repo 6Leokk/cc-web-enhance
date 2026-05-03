@@ -4,27 +4,27 @@
 Add safe intranet remote access support for `cc-web-enhance` with frp-first deployment docs, secure host/port defaults, regression coverage, and branch audit records, then commit and push the branch.
 
 ## Current Phase
-Phase 1
+Phase 4
 
 ## Phases
 
 ### Phase 1: Discovery, design, and audit docs
 - [x] Read current repo structure and entry points
 - [x] Capture requirements and safety boundaries
-- [ ] Write threat model, design doc, deployment doc, branch progress doc
-- **Status:** in_progress
+- [x] Write threat model, design doc, deployment doc, branch progress doc
+- **Status:** complete
 
 ### Phase 2: Safety-first test design
-- [ ] Add failing regression coverage for default bind behavior and frp artifact safety
-- [ ] Add script-level safety checks
-- [ ] Verify the new tests fail before implementation
-- **Status:** pending
+- [x] Add failing regression coverage for default bind behavior and frp artifact safety
+- [x] Add script-level safety checks
+- [x] Verify the new tests fail before implementation
+- **Status:** complete
 
 ### Phase 3: Minimal implementation
-- [ ] Add `CC_WEB_HOST` / `CC_WEB_PORT` support with validation
-- [ ] Add frp example configs and helper scripts
-- [ ] Update README and environment docs
-- **Status:** pending
+- [x] Add `CC_WEB_HOST` / `CC_WEB_PORT` support with validation
+- [x] Add frp example configs and helper scripts
+- [x] Update README and environment docs
+- **Status:** complete
 
 ### Phase 4: Verification
 - [ ] Run regression, node syntax checks, bash syntax checks, and grep-based safety scans

@@ -74,7 +74,13 @@ copy .env.example .env  & REM optional
 
 Then run `start.bat`, or start manually with `node server.js`.
 
-After startup, open `http://localhost:8002` and sign in with your password.
+After startup, open `http://127.0.0.1:8083` and sign in with your password.
+
+## Intranet Remote Access / frp Deployment
+
+The service still listens only on `127.0.0.1:8083` by default. For safe public access to an intranet machine, use frp to forward the public entry to the local cc-web address instead of changing cc-web to a public bind by default.
+
+See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design](./docs/intranet-access-design.md) for architecture and alternatives.
 
 ## Configuration
 
@@ -83,8 +89,10 @@ After startup, open `http://localhost:8002` and sign in with your password.
 | Variable | Required | Default | Description |
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | No | Auto-generated | Web login password (migrated into `config/auth.json` on first start) |
-| `PORT` | No | `8002` | Service port |
-| `HOST` | No | `127.0.0.1` | Bind address; use `0.0.0.0` for LAN access |
+| `CC_WEB_PORT` | No | `8083` | Service port |
+| `CC_WEB_HOST` | No | `127.0.0.1` | Bind address; keep default for frp mode |
+| `PORT` | No | - | Legacy alias; `CC_WEB_PORT` takes priority |
+| `HOST` | No | - | Legacy alias; `CC_WEB_HOST` takes priority |
 | `CLAUDE_PATH` | No | `claude` | Executable path to Claude CLI |
 | `CODEX_PATH` | No | `codex` | Executable path to Codex CLI |
 | `PUSHPLUS_TOKEN` | No | - | PushPlus token (migrated into notification config on first start) |
@@ -204,8 +212,8 @@ npm run regression:ui
 Security notes:
 
 - Do not commit `.env`, `config/`, `sessions/`, `logs/`, `attachments/`, `.npmrc`, or private key files.
-- The default bind address is `127.0.0.1`. For remote access, prefer Tailscale, Cloudflare Tunnel, or an Nginx reverse proxy with restricted source IPs.
-- If you set `HOST=0.0.0.0` for LAN access, use a strong password and firewall rules that allow only trusted devices.
+- The default bind address is `127.0.0.1:8083`. For remote access, prefer frp, Tailscale, Cloudflare Tunnel, or an Nginx reverse proxy with restricted source IPs.
+- Do not directly expose cc-web with `0.0.0.0` by default. If explicitly configured, use a strong password and firewall rules that allow only trusted devices.
 
 ### systemd Service
 
@@ -250,7 +258,7 @@ server {
     ssl_certificate_key /path/to/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8002;
+        proxy_pass http://127.0.0.1:8083;
         proxy_http_version 1.1;
 
         # WebSocket support
@@ -280,11 +288,10 @@ node server.js
 
 **LAN access** (same Wi-Fi):
 - For security, CC-Web listens on `127.0.0.1` by default. Prefer exposing it through a reverse proxy such as Nginx, or through Tailscale / Cloudflare Tunnel, with firewall rules limiting who can connect.
-- If LAN access is required, set `HOST=0.0.0.0` in `.env`, then open `http://<your-lan-ip>:8002`.
+- If LAN access is required, explicitly set `CC_WEB_HOST=0.0.0.0`, but the recommended remote-access path is to keep `127.0.0.1:8083` and follow [frp deployment](./docs/deploy-frp.md).
 
 **Remote access**:
-- Recommended: [Tailscale](https://tailscale.com/) for secure private networking.
-- Alternative: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) (requires domain setup).
+- Recommended: the frp path in [frp deployment](./docs/deploy-frp.md), or controlled tunnel options such as Tailscale / Cloudflare Tunnel.
 
 ## Release Notes
 

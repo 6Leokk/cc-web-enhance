@@ -1,0 +1,27 @@
+# frpc example for cc-web-enhance.
+# Replace placeholders before use. Do not commit real tokens.
+
+serverAddr = "YOUR_FRP_SERVER_IP"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "YOUR_FRP_TOKEN"
+
+[[proxies]]
+name = "cc-web-enhance-tcp"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8083
+remotePort = YOUR_PUBLIC_PORT
+
+# Optional HTTP domain mode. Enable only after replacing YOUR_DOMAIN.
+# [[proxies]]
+# name = "cc-web-enhance-http"
+# type = "http"
+# localIP = "127.0.0.1"
+# localPort = 8083
+# customDomains = ["YOUR_DOMAIN"]
+
+# HTTPS recommendation:
+# Terminate HTTPS at a reverse proxy on the public machine, then proxy to the
+# frp public entry. Keep cc-web itself on 127.0.0.1:8083.

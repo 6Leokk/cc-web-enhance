@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
+const { resolveServerBindConfig } = require('./lib/server-config');
 const { createAgentRuntime } = require('./lib/agent-runtime');
 const { parseClaudeTranscriptLines } = require('./lib/claude-transcript');
 const { applyCodexParsedTelemetryToSession } = require('./lib/codex-telemetry');
@@ -31,8 +32,15 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const PORT = parseInt(process.env.PORT) || 8002;
-const HOST = process.env.HOST || '127.0.0.1';
+let serverBindConfig;
+try {
+  serverBindConfig = resolveServerBindConfig(process.env);
+} catch (err) {
+  console.error(`CC-Web server configuration error: ${err.message}`);
+  process.exit(97);
+}
+const PORT = serverBindConfig.port;
+const HOST = serverBindConfig.host;
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
 const CODEX_PATH = process.env.CODEX_PATH || 'codex';
 const CONFIG_DIR = process.env.CC_WEB_CONFIG_DIR || path.join(__dirname, 'config');
