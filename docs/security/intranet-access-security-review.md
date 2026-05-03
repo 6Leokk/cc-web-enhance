@@ -39,8 +39,21 @@ Blocked patterns:
 - No real public IP/domain in frp examples.
 
 ## Round 3: Pre-push Final Review
-- Status: Pending.
-- Required before push:
-  - Re-run final verification commands.
-  - Inspect `git diff`, `git status`, and `git log --oneline`.
-  - Confirm docs and branch progress are complete.
+- Date: 2026-05-04
+- Status: Passed; push pending.
+
+Commands and results:
+- `npm run regression`: passed after commit `896a9c8`.
+- `git status --short --branch`: branch `feature/intranet-access-frp-safe`, clean at the time of final verification.
+- `git log --oneline --decorate -5`: confirmed staged branch commits on top of `origin/main`.
+- `git merge-base HEAD main && git diff --stat main...HEAD`: confirmed expected branch diff.
+- `git ls-files '*.js' ':!:public/vendor/*' | xargs -r -n 1 node --check`: passed.
+- `bash -n scripts/frp/*.sh && bash scripts/frp/check-frp-config.sh deploy/frp/frps.example.toml deploy/frp/frpc.example.toml`: passed.
+- `git grep` dangerous command scan: reviewed. Exact dangerous-command strings appear only in this security review and branch progress documentation, not in executable scripts.
+- `git grep 0.0.0.0`: reviewed. Findings are warnings, explicit opt-in tests, historical docs, and existing explicit-bind server handling.
+- secret-shaped scan for common `sk-`, `ghp_`, and Slack token formats: no hits.
+- targeted `token/password/secret` scan: reviewed. Findings are placeholders, auth docs, test fixtures, or existing auth logic.
+- `/tmp` Codex auth/config copy scan: returned `0`.
+
+Residual risk:
+- Existing code legitimately references `~/.codex/config.toml` for local Codex config reading. This branch did not add copying of that file and did not commit runtime credentials.

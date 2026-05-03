@@ -33,7 +33,7 @@ Phase 5
 
 ### Phase 5: Commit, review, and delivery
 - [x] Record branch progress and security review
-- [ ] Commit staged changes in logical chunks
+- [x] Commit staged changes in logical chunks
 - [ ] Push `feature/intranet-access-frp-safe` to origin
 - **Status:** in_progress
 

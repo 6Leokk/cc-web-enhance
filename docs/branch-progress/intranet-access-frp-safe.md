@@ -4,7 +4,7 @@
 Deliver a safe frp-first intranet remote access path for `cc-web-enhance`, with docs, scripts, tests, and staged commits, while preserving the default local-only bind.
 
 ## Current Phase
-Phase 4: verification complete, pre-push review pending
+Phase 5: final review complete, push pending
 
 ## Completed
 - Checked repository status, branch, and remotes
@@ -20,9 +20,10 @@ Phase 4: verification complete, pre-push review pending
 - Updated README and `.env.example` to document `127.0.0.1:8083`
 - Ran full regression and security-focused supplemental regressions
 - Completed post-implementation static security review
+- Completed pre-push final review
 
 ## Pending
-- Commit stage-by-stage and push
+- Push branch to `origin`
 
 ## Key Design Decisions
 | Decision | Rationale |
@@ -59,7 +60,7 @@ Phase 4: verification complete, pre-push review pending
 | `git ls-files '*.js' ':!:public/vendor/*' \| xargs -r -n 1 node --check` | PASS | All tracked relevant JS syntax checks passed |
 | `curl -sS --max-time 3 -I http://127.0.0.1:8083/` | PASS | HTTP 200 headers returned; read-only request only |
 | `/tmp` Codex auth/config copy scan | PASS | Count `0` for `.codex/auth.json` and `.codex/config.toml` under `/tmp` |
-| dangerous command grep | PASS | No `rm -rf`, `git reset --hard`, `git clean -fd`, or `chmod 777` in tracked files |
+| dangerous command grep | REVIEWED | Exact dangerous-command strings appear only in security/progress docs, not executable scripts |
 | `0.0.0.0` grep | REVIEWED | Findings are warnings/tests/historical docs or existing server explicit-bind handling; no default bind |
 | `token/password/secret` grep | REVIEWED | Findings are existing auth logic, fixtures, docs, and frp placeholders; no real secret identified |
 
@@ -72,14 +73,16 @@ Phase 4: verification complete, pre-push review pending
 - `superpowers:requesting-code-review` loaded for implementation completeness review
 - Implementation completeness review result: manual fallback used because code-reviewer subagent dispatch is not allowed without explicit user delegation in current tool policy. Manual review checked bind defaults, env priority, no token logging, frp placeholder-only examples, no dashboard default, local-only scripts, and README/env alignment.
 - `superpowers:verification-before-completion` loaded for post-test security review.
+- `superpowers:finishing-a-development-branch` loaded for final branch completion. User request explicitly requires pushing this branch, so the selected completion path is push branch to origin without merge or force-push.
 - Spec reviewer subagent not used yet; will fall back to manual review if tool policy prevents delegation
 
 ## Commit History
 - `c87369c` docs: add intranet access design
 - `6872e6c` feat: add safe frp access support
+- `896a9c8` docs: record frp branch security review
 
 ## Final Push Status
 - Not pushed yet
 
 ## Next Step
-Commit this security review record, then run final pre-push review and push after clean status.
+Commit this final review record, then push after clean status.
