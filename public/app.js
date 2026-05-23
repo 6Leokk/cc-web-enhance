@@ -38,6 +38,23 @@
     { value: 'segmented', label: '分段显示（默认）', desc: '系统默认。每段 assistant 回复单独成条，工具调用跟在对应段落下面。' },
     { value: 'single', label: '合并为一条', desc: '每轮 assistant 回复只显示一条消息，工具调用集中挂在这条消息下面。' },
   ];
+  const ACCESS_MODE_OPTIONS = [
+    { value: 'direct', label: '本机/局域网直连', desc: '不启动隧道服务，由 cc-web 直接提供网页访问。' },
+    { value: 'public', label: '公网服务器直连', desc: '这台机器已在公网或反向代理后面。' },
+    { value: 'ngrok', label: '无公网下远程访问', desc: '通过 ngrok 创建远程访问地址。' },
+    { value: 'frp', label: '自有 frp 服务器', desc: '复用内置 frp 客户端/服务端能力。' },
+  ];
+  const ACCESS_SCOPE_OPTIONS = [
+    { value: 'local', label: '仅本机', desc: '只允许当前机器浏览器访问。' },
+    { value: 'lan', label: '同 Wi-Fi / 局域网', desc: '允许同一可信局域网设备访问。' },
+  ];
+  const QUICK_LOGIN_URL_KIND_OPTIONS = [
+    { value: '', label: '自动选择' },
+    { value: 'remote', label: 'Remote' },
+    { value: 'public', label: 'Public' },
+    { value: 'lan', label: 'LAN' },
+    { value: 'local', label: 'Local' },
+  ];
 
   const MODEL_OPTIONS = [
     { value: 'opus', label: 'Opus', desc: '最强大，1M 上下文' },
@@ -2362,6 +2379,27 @@
         if (typeof _onDevConfig === 'function') _onDevConfig(msg.config);
         break;
 
+      case 'access_config':
+        if (typeof _onAccessConfig === 'function') _onAccessConfig(msg.config);
+        break;
+
+      case 'access_config_saved':
+        if (typeof _onAccessConfigSaved === 'function') _onAccessConfigSaved(msg);
+        break;
+
+      case 'access_status':
+        updateAccessSummary(msg.status || msg);
+        if (typeof _onAccessStatus === 'function') _onAccessStatus(msg.status || msg);
+        break;
+
+      case 'access_action_result':
+        if (typeof _onAccessActionResult === 'function') _onAccessActionResult(msg);
+        break;
+
+      case 'quick_login_created':
+        if (typeof _onQuickLoginCreated === 'function') _onQuickLoginCreated(msg);
+        break;
+
       case 'fetch_models_result':
         if (typeof _onFetchModelsResult === 'function') _onFetchModelsResult(msg);
         break;
@@ -3999,6 +4037,11 @@
   let _onClaudeLocalConfig = null;
   let _onCodexLocalConfig = null;
   let _onDevConfig = null;
+  let _onAccessConfig = null;
+  let _onAccessConfigSaved = null;
+  let _onAccessStatus = null;
+  let _onAccessActionResult = null;
+  let _onQuickLoginCreated = null;
 
   const settingsBtn = $('#settings-btn');
 
@@ -4111,6 +4154,404 @@
 
   function renderNotifyFields(fieldsDiv, config, provider) {
     fieldsDiv.innerHTML = buildNotifyFieldsHtml(config, provider);
+  }
+
+  function getAccessModeLabel(mode) {
+    return ACCESS_MODE_OPTIONS.find((item) => item.value === mode)?.label || mode || '未知';
+  }
+
+  function getAccessScopeLabel(scope) {
+    return ACCESS_SCOPE_OPTIONS.find((item) => item.value === scope)?.label || scope || '未知';
+  }
+
+  function buildAccessEntryHtml() {
+    return `
+      <div class="settings-section-title">访问方式</div>
+      <button class="settings-nav-card" type="button" data-open-access-page>
+        <span class="settings-nav-card-main">
+          <span class="settings-nav-card-title">Remote Access / 访问方式</span>
+          <span class="settings-nav-card-meta" data-access-summary>读取运行状态...</span>
+        </span>
+        <span class="settings-nav-card-arrow" aria-hidden="true">›</span>
+      </button>
+    `;
+  }
+
+  function updateAccessSummary(status) {
+    const text = status
+      ? `${getAccessModeLabel(status.mode || status.desiredMode)} · ${status.actualState || 'unknown'}${status.restartRequired || status.providerRestartRequired ? ' · 需要重启/重载' : ''}`
+      : '未加载';
+    document.querySelectorAll('[data-access-summary]').forEach((node) => {
+      node.textContent = text;
+    });
+  }
+
+  function isAccessFieldLocked(config, field) {
+    const locked = Array.isArray(config?.lockedFields) ? config.lockedFields : [];
+    return locked.includes(field);
+  }
+
+  function renderAccessStatusList(urls) {
+    const groups = [
+      ['local', 'Local'],
+      ['lan', 'LAN'],
+      ['public', 'Public'],
+      ['remote', 'Remote'],
+    ];
+    return groups.map(([key, label]) => {
+      const list = Array.isArray(urls?.[key]) ? urls[key] : [];
+      const body = list.length
+        ? list.map((url) => `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`).join('')
+        : '<span class="access-empty">暂无</span>';
+      return `
+        <div class="access-url-group">
+          <div class="access-url-kind">${label}</div>
+          <div class="access-url-list">${body}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function normalizeQuickLoginHash() {
+    const hash = String(location.hash || '');
+    if (!hash.startsWith('#pair=')) return null;
+    return decodeURIComponent(hash.slice('#pair='.length)).trim();
+  }
+
+  function clearQuickLoginHash() {
+    if (!location.hash) return;
+    history.replaceState(null, document.title, `${location.pathname}${location.search}`);
+  }
+
+  async function exchangeQuickLoginToken(token) {
+    if (!token) return null;
+    const response = await fetch('/api/quick-login/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.message || 'Quick login exchange failed');
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  }
+
+  async function handleQuickLoginFragment() {
+    const token = normalizeQuickLoginHash();
+    if (!token) return false;
+    clearQuickLoginHash();
+    try {
+      const result = await exchangeQuickLoginToken(token);
+      if (!result?.ok) {
+        loginError.textContent = result?.message || result?.reason || '快速登录失败';
+        loginError.hidden = false;
+        return false;
+      }
+      authToken = result.token || result.authToken || result.sessionToken || authToken;
+      if (authToken) {
+        localStorage.setItem('cc-web-token', authToken);
+      }
+      if (ws && ws.readyState === 1 && authToken) {
+        send({ type: 'auth', token: authToken });
+      } else if (!ws || ws.readyState > 1) {
+        connect();
+      }
+      return true;
+    } catch (err) {
+      loginError.textContent = err?.payload?.message || err.message || '快速登录失败';
+      loginError.hidden = false;
+      return false;
+    }
+  }
+
+  function buildAccessStatusHtml(status) {
+    if (!status) {
+      return '<div class="settings-inline-note">正在读取访问状态...</div>';
+    }
+    const warnings = Array.isArray(status.warnings) ? status.warnings : [];
+    const errors = Array.isArray(status.errors) ? status.errors : [];
+    const quick = status.quickLogin || {};
+    return `
+      <div class="access-status-grid">
+        <div><span>当前模式</span><strong>${escapeHtml(getAccessModeLabel(status.mode))}</strong></div>
+        <div><span>期望模式</span><strong>${escapeHtml(getAccessModeLabel(status.desiredMode || status.mode))}</strong></div>
+        <div><span>运行状态</span><strong>${escapeHtml(status.actualState || 'unknown')}</strong></div>
+        <div><span>Provider</span><strong>${escapeHtml(status.provider || 'none')}</strong></div>
+        <div><span>直连范围</span><strong>${escapeHtml(getAccessScopeLabel(status.directScope))}</strong></div>
+        <div><span>快速登录</span><strong>${quick.allowed ? '可用' : escapeHtml(quick.reason || '不可用')}</strong></div>
+      </div>
+      ${status.restartRequired || status.providerRestartRequired ? '<div class="settings-inline-note warning">配置已保存，但需要重启服务或重新启动 provider 后才会完全生效。</div>' : ''}
+      ${warnings.map((item) => `<div class="settings-inline-note warning">${escapeHtml(item)}</div>`).join('')}
+      ${errors.map((item) => `<div class="settings-inline-note access-error">${escapeHtml(item)}</div>`).join('')}
+      <div class="access-url-section">${renderAccessStatusList(status.urls || {})}</div>
+    `;
+  }
+
+  function buildAccessConfigHtml(config) {
+    const mode = config?.mode || 'direct';
+    const scope = config?.directScope || 'local';
+    const ngrok = config?.ngrok || {};
+    const frp = config?.frp || {};
+    return `
+      <div class="settings-field">
+        <label>访问方式</label>
+        <select class="settings-select" id="access-mode" ${isAccessFieldLocked(config, 'mode') ? 'disabled' : ''}>
+          ${ACCESS_MODE_OPTIONS.map((option) => `<option value="${option.value}" ${option.value === mode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="settings-field access-direct-scope-field">
+        <label>直连范围</label>
+        <div class="settings-segmented access-segmented" role="radiogroup" aria-label="直连范围">
+          ${ACCESS_SCOPE_OPTIONS.map((option) => `
+            <button
+              class="settings-segmented-btn${option.value === scope ? ' active' : ''}"
+              type="button"
+              role="radio"
+              aria-checked="${option.value === scope ? 'true' : 'false'}"
+              data-access-scope="${option.value}"
+              ${isAccessFieldLocked(config, 'directScope') ? 'disabled' : ''}
+              title="${escapeHtml(option.desc)}"
+            >${escapeHtml(option.label)}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div class="settings-field">
+        <label>Public URL</label>
+        <input type="text" id="access-public-url" placeholder="https://cc.example.com" value="${escapeHtml(config?.publicUrl || '')}" ${isAccessFieldLocked(config, 'publicUrl') ? 'disabled' : ''}>
+      </div>
+      <div class="settings-divider"></div>
+      <div class="settings-section-title">ngrok</div>
+      <div class="settings-field">
+        <label>Authtoken</label>
+        <input type="password" id="access-ngrok-token" placeholder="ngrok authtoken" value="${escapeHtml(ngrok.authtoken || '')}" ${isAccessFieldLocked(config, 'ngrokAuthtoken') || isAccessFieldLocked(config, 'ngrok.authtoken') ? 'disabled' : ''}>
+      </div>
+      <div class="settings-field">
+        <label>Domain</label>
+        <input type="text" id="access-ngrok-domain" placeholder="optional.ngrok-free.app" value="${escapeHtml(ngrok.domain || '')}" ${isAccessFieldLocked(config, 'ngrokDomain') || isAccessFieldLocked(config, 'ngrok.domain') ? 'disabled' : ''}>
+      </div>
+      <div class="settings-field">
+        <label>Basic Auth</label>
+        <input type="text" id="access-ngrok-basic-auth" placeholder="user:password" value="${escapeHtml(ngrok.basicAuth || '')}" ${isAccessFieldLocked(config, 'ngrokBasicAuth') || isAccessFieldLocked(config, 'ngrok.basicAuth') ? 'disabled' : ''}>
+      </div>
+      <div class="settings-field settings-toggle-row">
+        <label for="access-ngrok-auto-start">ngrok autoStart</label>
+        <input type="checkbox" id="access-ngrok-auto-start" ${ngrok.autoStart === false ? '' : 'checked'} ${isAccessFieldLocked(config, 'ngrokAutoStart') || isAccessFieldLocked(config, 'ngrok.autoStart') ? 'disabled' : ''}>
+      </div>
+      <div class="settings-divider"></div>
+      <div class="settings-section-title">frp</div>
+      <div class="settings-field settings-toggle-row">
+        <label for="access-frp-auto-start">frp autoStart</label>
+        <input type="checkbox" id="access-frp-auto-start" ${frp.autoStart === false ? '' : 'checked'} ${isAccessFieldLocked(config, 'frpAutoStart') || isAccessFieldLocked(config, 'frp.autoStart') ? 'disabled' : ''}>
+      </div>
+    `;
+  }
+
+  function collectAccessConfig(panel, currentConfig) {
+    const scopeBtn = panel.querySelector('[data-access-scope].active');
+    const publicUrlInput = panel.querySelector('#access-public-url');
+    const ngrokTokenInput = panel.querySelector('#access-ngrok-token');
+    const ngrokDomainInput = panel.querySelector('#access-ngrok-domain');
+    const ngrokBasicAuthInput = panel.querySelector('#access-ngrok-basic-auth');
+    const clearFields = [];
+    if ((currentConfig?.publicUrl || '') && !(publicUrlInput?.value || '').trim()) clearFields.push('publicUrl');
+    if ((currentConfig?.ngrok?.authtoken || '') && !(ngrokTokenInput?.value || '').trim()) clearFields.push('ngrok.authtoken');
+    if ((currentConfig?.ngrok?.domain || '') && !(ngrokDomainInput?.value || '').trim()) clearFields.push('ngrok.domain');
+    if ((currentConfig?.ngrok?.basicAuth || '') && !(ngrokBasicAuthInput?.value || '').trim()) clearFields.push('ngrok.basicAuth');
+    return {
+      mode: panel.querySelector('#access-mode')?.value || currentConfig?.mode || 'direct',
+      directScope: scopeBtn?.dataset.accessScope || currentConfig?.directScope || 'local',
+      publicUrl: publicUrlInput?.value.trim() || '',
+      ngrok: {
+        authtoken: ngrokTokenInput?.value.trim() || '',
+        domain: ngrokDomainInput?.value.trim() || '',
+        basicAuth: ngrokBasicAuthInput?.value.trim() || '',
+        autoStart: !!panel.querySelector('#access-ngrok-auto-start')?.checked,
+      },
+      frp: {
+        autoStart: !!panel.querySelector('#access-frp-auto-start')?.checked,
+      },
+      clearFields,
+    };
+  }
+
+  function openAccessSubpage() {
+    send({ type: 'get_access_config' });
+    send({ type: 'get_access_status' });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'settings-overlay settings-subpage-overlay';
+    overlay.style.zIndex = '10001';
+
+    const panel = document.createElement('div');
+    panel.className = 'settings-panel settings-subpage-panel access-settings-panel';
+    panel.innerHTML = `
+      <div class="settings-header settings-subpage-header">
+        <button class="settings-back" type="button" aria-label="返回">‹</button>
+        <div class="settings-subpage-copy">
+          <div class="settings-subpage-kicker">Remote Access</div>
+          <h3>访问方式</h3>
+        </div>
+      </div>
+      <div id="access-status-area">${buildAccessStatusHtml(null)}</div>
+      <div class="settings-divider"></div>
+      <div id="access-config-area">${buildAccessConfigHtml(null)}</div>
+      <div class="settings-actions access-provider-actions">
+        <button class="btn-test" id="access-start-btn">启动 provider</button>
+        <button class="btn-test" id="access-stop-btn">停止 provider</button>
+      </div>
+      <div class="settings-actions">
+        <button class="btn-save" id="access-save-btn">保存访问配置</button>
+      </div>
+      <div class="settings-divider"></div>
+      <div class="settings-section-title">Quick Login</div>
+      <div class="access-quick-row">
+        <select class="settings-select" id="access-quick-kind">
+          ${QUICK_LOGIN_URL_KIND_OPTIONS.map((item) => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}
+        </select>
+        <button class="btn-test" id="access-quick-create">创建</button>
+      </div>
+      <div id="access-quick-result"></div>
+      <div class="settings-status" id="access-status-message"></div>
+    `;
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    const statusArea = panel.querySelector('#access-status-area');
+    const configArea = panel.querySelector('#access-config-area');
+    const statusMessage = panel.querySelector('#access-status-message');
+    const quickResult = panel.querySelector('#access-quick-result');
+    let currentConfig = null;
+    let currentStatus = null;
+
+    function setStatusMessage(text, type) {
+      statusMessage.textContent = text || '';
+      statusMessage.className = 'settings-status ' + (type || '');
+    }
+
+    function renderConfig() {
+      configArea.innerHTML = buildAccessConfigHtml(currentConfig);
+      configArea.querySelectorAll('[data-access-scope]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (button.disabled) return;
+          configArea.querySelectorAll('[data-access-scope]').forEach((item) => {
+            const active = item === button;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-checked', active ? 'true' : 'false');
+          });
+        });
+      });
+    }
+
+    function getSelectedAccessProvider() {
+      const provider = currentStatus?.provider && currentStatus.provider !== 'none'
+        ? currentStatus.provider
+        : (currentConfig?.mode || '');
+      return provider === 'ngrok' || provider === 'frp' ? provider : undefined;
+    }
+
+    const savedOnAccessConfig = _onAccessConfig;
+    const savedOnAccessConfigSaved = _onAccessConfigSaved;
+    const savedOnAccessStatus = _onAccessStatus;
+    const savedOnAccessActionResult = _onAccessActionResult;
+    const savedOnQuickLoginCreated = _onQuickLoginCreated;
+
+    _onAccessConfig = (config) => {
+      currentConfig = config || {};
+      renderConfig();
+      if (currentStatus) statusArea.innerHTML = buildAccessStatusHtml(currentStatus);
+      if (savedOnAccessConfig) savedOnAccessConfig(config);
+    };
+    _onAccessConfigSaved = (result) => {
+      if (result?.ok === false) {
+        setStatusMessage(result.message || '保存失败', 'error');
+      } else {
+        if (result?.config) {
+          currentConfig = result.config;
+          renderConfig();
+        }
+        if (result?.status) _onAccessStatus(result.status);
+        setStatusMessage('访问配置已保存', 'success');
+      }
+      if (savedOnAccessConfigSaved) savedOnAccessConfigSaved(result);
+    };
+    _onAccessStatus = (status) => {
+      currentStatus = status || null;
+      statusArea.innerHTML = buildAccessStatusHtml(currentStatus);
+      updateAccessSummary(currentStatus);
+      if (savedOnAccessStatus) savedOnAccessStatus(status);
+    };
+    _onAccessActionResult = (result) => {
+      setStatusMessage(result?.message || (result?.ok === false ? '操作失败' : '操作完成'), result?.ok === false ? 'error' : 'success');
+      if (result?.status) _onAccessStatus(result.status);
+      if (savedOnAccessActionResult) savedOnAccessActionResult(result);
+    };
+    _onQuickLoginCreated = (result) => {
+      if (result?.status) _onAccessStatus(result.status);
+      if (result?.ok) {
+        const ttl = Number(result.ttlSeconds || 0) > 0 ? `${Number(result.ttlSeconds)} 秒` : '未提供';
+        quickResult.innerHTML = `
+          <div class="access-quick-result success">
+            <div><span>URL</span><a href="${escapeHtml(result.url || '')}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.url || '')}</a></div>
+            <div><span>baseUrlKind</span><strong>${escapeHtml(result.baseUrlKind || '')}</strong></div>
+            <div><span>baseUrl</span><strong>${escapeHtml(result.baseUrl || '')}</strong></div>
+            <div><span>ttlSeconds</span><strong>${escapeHtml(String(result.ttlSeconds || ''))}</strong></div>
+            ${result.expiresAt ? `<div><span>expiresAt</span><strong>${escapeHtml(result.expiresAt)}</strong></div>` : ''}
+            ${result.reason ? `<div><span>reason</span><strong>${escapeHtml(result.reason)}</strong></div>` : ''}
+          </div>
+        `;
+        setStatusMessage(`Quick login 已创建，有效期 ${ttl}`, 'success');
+      } else {
+        quickResult.innerHTML = `
+          <div class="access-quick-result error">
+            <div><span>reason</span><strong>${escapeHtml(result?.reason || 'unknown')}</strong></div>
+            ${result?.message ? `<div><span>message</span><strong>${escapeHtml(result.message)}</strong></div>` : ''}
+            ${result?.baseUrlKind ? `<div><span>baseUrlKind</span><strong>${escapeHtml(result.baseUrlKind)}</strong></div>` : ''}
+            ${result?.ttlSeconds ? `<div><span>ttlSeconds</span><strong>${escapeHtml(String(result.ttlSeconds))}</strong></div>` : ''}
+          </div>
+        `;
+        setStatusMessage(result?.message || result?.reason || 'Quick login 创建失败', 'error');
+      }
+      if (savedOnQuickLoginCreated) savedOnQuickLoginCreated(result);
+    };
+
+    panel.querySelector('#access-save-btn').addEventListener('click', () => {
+      setStatusMessage('正在保存...', '');
+      const { clearFields, ...config } = collectAccessConfig(panel, currentConfig);
+      send({ type: 'save_access_config', config, clearFields });
+    });
+    panel.querySelector('#access-start-btn').addEventListener('click', () => {
+      setStatusMessage('正在启动 provider...', '');
+      send({ type: 'start_access_provider', provider: getSelectedAccessProvider() });
+    });
+    panel.querySelector('#access-stop-btn').addEventListener('click', () => {
+      setStatusMessage('正在停止 provider...', '');
+      send({ type: 'stop_access_provider', provider: getSelectedAccessProvider() });
+    });
+    panel.querySelector('#access-quick-create').addEventListener('click', () => {
+      const preferredUrlKind = panel.querySelector('#access-quick-kind')?.value || '';
+      quickResult.innerHTML = '';
+      setStatusMessage('正在创建 Quick login...', '');
+      send({
+        type: 'create_quick_login',
+        ...(preferredUrlKind ? { preferredUrlKind } : {}),
+      });
+    });
+
+    const closeSubpage = () => {
+      _onAccessConfig = savedOnAccessConfig;
+      _onAccessConfigSaved = savedOnAccessConfigSaved;
+      _onAccessStatus = savedOnAccessStatus;
+      _onAccessActionResult = savedOnAccessActionResult;
+      _onQuickLoginCreated = savedOnQuickLoginCreated;
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+
+    panel.querySelector('.settings-back').addEventListener('click', closeSubpage);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSubpage(); });
   }
 
   function collectNotifyConfigFromPanel(panel, currentConfig, provider) {
@@ -4323,6 +4764,7 @@
     send({ type: 'get_codex_config' });
     send({ type: 'get_notify_config' });
     send({ type: 'get_ui_config' });
+    send({ type: 'get_access_status' });
 
     const overlay = document.createElement('div');
     overlay.className = 'settings-overlay';
@@ -4360,6 +4802,10 @@
 
       <div class="settings-divider"></div>
 
+      ${buildAccessEntryHtml()}
+
+      <div class="settings-divider"></div>
+
       ${buildNotifyEntryHtml(null)}
 
       <div class="settings-divider"></div>
@@ -4390,8 +4836,11 @@
     bindAppearancePrefs(panel);
     const notifyPageBtn2 = panel.querySelector('[data-open-notify-page]');
     if (notifyPageBtn2) notifyPageBtn2.addEventListener('click', openNotifySubpage);
+    const accessPageBtn = panel.querySelector('[data-open-access-page]');
+    if (accessPageBtn) accessPageBtn.addEventListener('click', openAccessSubpage);
     const devPageBtn = panel.querySelector('[data-open-dev-page]');
     if (devPageBtn) devPageBtn.addEventListener('click', openDevSettingsSubpage);
+    send({ type: 'get_access_status' });
 
     // === Claude Config UI ===
     const claudeConfigArea = panel.querySelector('#claude-config-area');
@@ -5096,6 +5545,11 @@
     _onClaudeLocalConfig = null;
     _onCodexLocalConfig = null;
     _onDevConfig = null;
+    _onAccessConfig = null;
+    _onAccessConfigSaved = null;
+    _onAccessStatus = null;
+    _onAccessActionResult = null;
+    _onQuickLoginCreated = null;
     window._ccOnUpdateInfo = null;
     document.removeEventListener('keydown', _settingsEscape);
   }
@@ -5736,7 +6190,13 @@
   }
   setCurrentAgent(currentAgent);
   renderSessionList();
-  connect();
+  if (normalizeQuickLoginHash()) {
+    handleQuickLoginFragment().finally(() => {
+      if (!ws || ws.readyState > 1) connect();
+    });
+  } else {
+    connect();
+  }
   window.addEventListener('resize', updateCwdBadge);
 
   // Register Service Worker for mobile push notifications

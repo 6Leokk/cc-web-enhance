@@ -1,6 +1,6 @@
 # frp 部署说明
 
-本文档说明如何通过 frp 安全访问内网机器上的 `cc-web-enhance`。
+本文档说明如何通过 frp 安全访问内网机器上的 `cc-web-enhance`。在新的访问模式模型里，frp 是自托管高级路径，不是默认路径；默认 local-only，远程无公网场景优先 ngrok。
 
 推荐链路：
 
@@ -9,6 +9,21 @@
 ```
 
 默认不要把 cc-web 改成公网监听。frpc 只转发到内网机器的 `127.0.0.1:8083`。
+
+## 访问模式兼容
+
+如果你采用新配置，推荐直接设置：
+
+```env
+CC_WEB_ACCESS_MODE=frp
+```
+
+旧配置仍兼容：
+- `FRP_MODE=client` 或 `FRP_MODE=server` 且未设置 `CC_WEB_ACCESS_MODE` 时，运行时会按 `frp` 处理
+- `FRP_AUTO_START=1` 时，`npm start` 会自动拉起 frp
+- `FRP_AUTO_START=0` 时，只保留配置，不自动启动
+
+`CC_WEB_PUBLIC_URL` 只用于 public/反代场景，不是 frp 必填项。
 
 ## 内置 frp 快速方式
 本仓库提供内置 frp 下载、配置生成和进程管理脚本：
@@ -27,6 +42,26 @@ npm run frp:status
 - `frp/run/`：pid 文件
 
 这些路径均已被 `.gitignore` 忽略。不要把 `frp/conf/*.toml` 复制到仓库提交区。
+
+## 大陆网络下载策略
+
+大陆部署脚本不会修改宿主机 npm 配置。依赖安装使用本次命令参数，例如 `npm install --registry=https://registry.npmmirror.com`。frp 下载默认仍保留 SHA256 校验，并可用以下变量优化网络路径：
+
+- `FRP_DOWNLOAD_GITHUB_PROXY_BASE`：给官方 GitHub Release 资源 URL 增加代理前缀。
+- `FRP_DOWNLOAD_BASE_URL`：按 `<base>/v<version>/<asset>` 从镜像下载。
+- `FRP_DOWNLOAD_URL`：从完整镜像 URL 下载。
+- `FRP_DOWNLOAD_SHA256`：直接镜像下载时必填，用于校验压缩包。
+- `FRP_VERSION`：直接镜像下载时必填，用于选择资产名。
+
+示例：
+
+```bash
+bash scripts/deploy/linux-cn.sh --with-frp
+bash scripts/deploy/macos-cn.sh --with-frp
+scripts\deploy\windows-cn.cmd --with-frp
+```
+
+这些一键部署脚本默认带 `--reset`，会先删除 `node_modules`、`frp/bin`、`frp/tmp`，再重新安装依赖和下载 frp。它不会删除 `.env`、`frp/conf`、日志或用户配置。下载中断、解压失败或依赖安装半失败后，直接重跑同一个脚本即可从干净状态恢复；如需保留现有安装产物，可直接运行 `node scripts/deploy.js --profile cn --no-reset`。
 
 ## 公网机器
 1. 克隆仓库并运行 `npm install`。

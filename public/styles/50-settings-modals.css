@@ -277,6 +277,118 @@
 .settings-subpage-panel {
   max-width: 460px;
 }
+.access-settings-panel {
+  max-width: 560px;
+}
+.access-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.access-status-grid > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+.access-status-grid span,
+.access-quick-result span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.access-status-grid strong,
+.access-quick-result strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.access-url-section {
+  display: grid;
+  gap: 8px;
+}
+.access-url-group {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--field-surface-bg);
+}
+.access-url-kind {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+.access-url-list {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.access-url-list a,
+.access-quick-result a {
+  color: var(--accent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.access-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.access-segmented {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-segmented-btn:disabled,
+.settings-field input:disabled,
+.settings-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.settings-inline-note.access-error,
+.access-quick-result.error {
+  color: var(--danger);
+  background: rgba(232, 93, 93, 0.08);
+  border-color: rgba(232, 93, 93, 0.22);
+}
+.access-provider-actions {
+  margin-top: 12px;
+}
+.access-quick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+}
+.access-quick-row .btn-test {
+  padding: 10px;
+  border: 1px solid var(--secondary-action-border);
+  border-radius: 10px;
+  background: var(--secondary-action-bg);
+  color: var(--secondary-action-text);
+  box-shadow: var(--secondary-action-shadow);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+.access-quick-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--inline-note-border);
+  border-radius: 10px;
+  background: var(--inline-note-bg);
+}
+.access-quick-result.success {
+  border-color: rgba(93, 138, 84, 0.25);
+}
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -404,6 +516,11 @@
   .settings-panel { width: 95%; padding: 20px 16px; }
   .settings-nav-card { padding: 13px 14px; }
   .settings-back { width: 32px; height: 32px; }
+  .access-status-grid,
+  .access-url-group,
+  .access-quick-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* === Force Change Password Overlay === */

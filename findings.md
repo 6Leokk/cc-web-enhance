@@ -496,5 +496,13 @@ Avoid live ngrok network calls in default regression.
 - `README.md`
 - npm package metadata for `@ngrok/ngrok`: official SDK, no standalone binary management needed.
 
+## 2026-05-24 Deployment Preset Findings
+- Current `scripts/frp-download.js` resolves frp assets through the GitHub Releases API and verifies GitHub-provided SHA256 digests.
+- Current `package.json` has no deploy preset scripts.
+- Existing Windows startup entry is `start.bat`, but there are no international/mainland deployment wrappers.
+- Mainland npm install should use `npm install --registry=https://registry.npmmirror.com` or an equivalent child-process env/argument, not `npm config set`.
+- npmmirror provides an npm registry mirror; its generic binary HTML endpoint exists, but frp is not exposed through the tested `/-/binary/frp/` JSON endpoint.
+- A mirror/proxy-based frp path should be configurable and keep checksum verification mandatory for direct mirror downloads.
+
 ## Visual/Browser Findings
 - No visual mockups reviewed yet.

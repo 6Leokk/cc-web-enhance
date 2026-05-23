@@ -74,21 +74,95 @@ copy .env.example .env  & REM 可选
 
 启动后访问 `http://127.0.0.1:8083`，输入密码即可使用。
 
-## 内网远程访问 / frp 部署
+## 一键部署脚本
 
-默认服务仍只监听 `127.0.0.1:8083`。需要从公网安全访问内网机器时，推荐使用 frp 把公网入口转发到内网机器的本地地址，不要把 cc-web 默认改成公网监听。
+仓库提供国际版和大陆版部署 preset。脚本只影响当前命令，不会执行 `npm config set`，也不会修改宿主机的全局 npm 镜像源或用户 `.npmrc`。
 
-本分支内置 frp 下载、配置生成和进程管理，不需要手动下载 frp：
+这些一键脚本默认带 `--reset`，会先删除 `node_modules`、`frp/bin`、`frp/tmp`，再重新安装依赖和下载需要的 frp 文件；不会删除 `.env`、`frp/conf`、日志或用户配置。这样下载中断或依赖安装半失败后，用户直接重跑同一个脚本即可恢复。确实要保留当前安装产物时，可直接运行 `node scripts/deploy.js --profile cn --no-reset` 或 `node scripts/deploy.js --profile global --no-reset`。
+
+国际版使用 npm 默认源和官方 frp Release 路径：
+
+```bash
+bash scripts/deploy/linux-global.sh
+bash scripts/deploy/macos-global.sh
+```
+
+```cmd
+scripts\deploy\windows-global.cmd
+```
+
+大陆版默认用本次命令参数安装依赖，等价于 `npm install --registry=https://registry.npmmirror.com`，并在 frp 下载时默认注入 GitHub Release 资源代理：
+
+```bash
+bash scripts/deploy/linux-cn.sh
+bash scripts/deploy/macos-cn.sh
+```
+
+```cmd
+scripts\deploy\windows-cn.cmd
+```
+
+如果需要同时准备 frp，给任一脚本追加 `--with-frp`。如果要启动服务，再追加 `--start`。完全镜像化 frp 下载时，可传入 `--frp-download-base-url`、`--frp-version` 和 `--frp-download-sha256`；缺少 SHA256 时脚本会拒绝直接镜像下载。
+
+## 访问模式 / 远程访问
+
+默认模式是 `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=local`，服务只监听 `127.0.0.1:8083`，只允许本机浏览器访问。任何超出本机的访问方式都需要显式选择。
+
+最快的 ngrok 启动方式：
+
+```bash
+npm run start:ngrok
+```
+
+首次运行会在终端提示粘贴 ngrok authtoken，并可选填写固定 domain 和 Basic Auth。脚本会自动把 `.env` 切到 `CC_WEB_ACCESS_MODE=ngrok`、保持 `CC_WEB_HOST=127.0.0.1`、开启 `NGROK_AUTO_START=1`，然后启动 cc-web。后续再运行同一命令会复用 `.env` 里的配置。只想配置不启动时运行：
+
+完全通过终端参数配置也可以，不需要交互提示：
+
+```bash
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN --domain YOUR_DOMAIN
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN --basic-auth user:pass
+```
+
+也可以只通过环境变量传入：
+
+```bash
+NGROK_AUTHTOKEN=YOUR_NGROK_AUTHTOKEN npm run start:ngrok
+```
+
+只想配置不启动时运行：
+
+```bash
+npm run setup:ngrok
+```
+
+常用模式：
+
+| 使用场景 | 配置 | 说明 |
+|---------|------|------|
+| 本机网页访问 | `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=local` | 默认值，只显示本机 URL |
+| 同一局域网访问 | `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=lan` | 面向同一 Wi-Fi / 同一可信局域网设备 |
+| 公网服务器直连 | `CC_WEB_ACCESS_MODE=public` | 适合 VPS 或用户自管反向代理；建议使用 HTTPS 和访问控制 |
+| 无公网下远程访问 | `CC_WEB_ACCESS_MODE=ngrok` + `NGROK_AUTHTOKEN` | 适合没有公网 IP 的个人机器，内置 ngrok provider 会转发到本机 loopback 服务 |
+| 自托管高级路径 | `CC_WEB_ACCESS_MODE=frp` 或兼容 `FRP_MODE=client/server` | 适合已有 frps/VPS 的用户 |
+
+小用户流程：启动后打开设置，选择本机、局域网、无公网下远程访问、公网服务器或 frp；当界面给出 QR/quick-login 链接时，可以扫码或复制链接登录。quick-login 使用 `/#pair=` fragment，不把配对 token 放进 query string；裸 public HTTP 默认禁用 quick-login。
+
+## frp 自托管部署
+
+frp 保留为高级自托管路径。默认仍不要把 cc-web 改成公网监听；frpc 应转发到内网机器的 `127.0.0.1:8083`。如果只需要无公网远程访问，优先考虑上面的 `ngrok` 模式。
+
+本仓库内置 frp 下载、配置生成和进程管理，不需要手动下载 frp：
 
 ```bash
 cp .env.example .env
-# 编辑 .env：填写 FRP_SERVER_ADDR、FRP_SERVER_PORT、FRP_TOKEN，并选择 FRP_TYPE=ip 或 domain
+# 编辑 .env：设置 CC_WEB_ACCESS_MODE=frp，填写 FRP_SERVER_ADDR、FRP_SERVER_PORT、FRP_TOKEN，并选择 FRP_TYPE=ip 或 domain
 npm run frp:download
 npm run frp:setup
 npm start
 ```
 
-`npm start` 会在 `FRP_MODE=client` 或 `FRP_MODE=server` 时自动启动对应的 `frpc`/`frps`。也可以单独使用 `npm run frp:start`、`npm run frp:stop`、`npm run frp:status` 管理 frp 进程。生成的二进制、配置、日志和 pid 文件位于 `frp/`，其中 `frp/bin/`、`frp/conf/`、`frp/logs/`、`frp/run/` 均已被 `.gitignore` 忽略。
+兼容旧配置：如果未设置 `CC_WEB_ACCESS_MODE`，但 `FRP_MODE=client` 或 `FRP_MODE=server` 存在，访问模式会按 `frp` 处理。`npm start` 会在 `FRP_AUTO_START=1` 且 frp 模式启用时自动启动对应的 `frpc`/`frps`。也可以单独使用 `npm run frp:start`、`npm run frp:stop`、`npm run frp:status` 管理 frp 进程。生成的二进制、配置、日志和 pid 文件位于 `frp/`，其中 `frp/bin/`、`frp/conf/`、`frp/logs/`、`frp/run/` 均已被 `.gitignore` 忽略。
 
 详细步骤见 [frp 部署说明](./docs/deploy-frp.md)，架构与替代方案见 [内网远程访问设计](./docs/intranet-access-design.md)。
 
@@ -100,10 +174,18 @@ npm start
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | 否 | 自动生成 | Web 登录密码（首次启动自动迁移到 `config/auth.json`） |
 | `CC_WEB_PORT` | 否 | `8083` | 服务监听端口 |
-| `CC_WEB_HOST` | 否 | `127.0.0.1` | 服务监听地址；frp 模式建议保持默认 |
+| `CC_WEB_HOST` | 否 | `127.0.0.1` | 服务监听地址；`direct/local`、`ngrok`、`frp` 模式建议保持默认 |
+| `CC_WEB_ACCESS_MODE` | 否 | `direct` | 访问模式：`direct` / `public` / `ngrok` / `frp` |
+| `CC_WEB_DIRECT_SCOPE` | 否 | `local` | `direct` 模式作用域：`local` / `lan` |
+| `CC_WEB_PUBLIC_URL` | 否 | - | public 或反代场景的公开 origin；只填 `https://host[:port]`，不要带 path/query/hash |
+| `CC_WEB_TRUST_PROXY` | 否 | `0` | 仅在受信任反向代理之后运行时设为 `1` |
 | `PORT` | 否 | - | 兼容旧变量；`CC_WEB_PORT` 优先 |
 | `HOST` | 否 | - | 兼容旧变量；`CC_WEB_HOST` 优先 |
-| `FRP_MODE` | 否 | `disabled` | 内置 frp 模式：`disabled` / `client` / `server` |
+| `NGROK_AUTHTOKEN` | `ngrok` 必填 | - | ngrok authtoken；只写入本地 `.env`，不要提交 |
+| `NGROK_DOMAIN` | 否 | - | 可选的 ngrok 固定域名 |
+| `NGROK_BASIC_AUTH` | 否 | - | 可选的 ngrok Basic Auth，格式 `user:pass` |
+| `NGROK_AUTO_START` | 否 | `1` | 设为 `0` 时禁止 `npm start` 自动启动 ngrok |
+| `FRP_MODE` | 否 | `disabled` | 兼容旧变量；未设置 `CC_WEB_ACCESS_MODE` 且为 `client`/`server` 时按 `frp` 模式处理 |
 | `FRP_TYPE` | 否 | `ip` | 客户端穿透类型：公网 IP 端口模式 `ip`，或域名模式 `domain` |
 | `FRP_SERVER_ADDR` | frp client 必填 | `YOUR_FRP_SERVER_IP` | 公网 frps 地址，占位符需要替换 |
 | `FRP_SERVER_PORT` | 否 | `7000` | frps 连接端口 |
@@ -118,6 +200,11 @@ npm start
 | `FRP_AUTO_START` | 否 | `1` | 设为 `0` 时禁止 `npm start` 自动启动 frp |
 | `FRP_CONFIG_FILE` | 否 | `frp/conf/frpc.toml` 或 `frp/conf/frps.toml` | 生成/读取的 frp 配置路径 |
 | `FRP_EXTRA_TOML_FILE` | 否 | - | 追加原生 frp TOML 的本地文件路径 |
+| `FRP_DOWNLOAD_GITHUB_PROXY_BASE` | 否 | - | frp 官方 Release 资源下载代理前缀；大陆部署脚本默认注入 |
+| `FRP_DOWNLOAD_BASE_URL` | 否 | - | frp 镜像 base，按 `<base>/v<version>/<asset>` 下载 |
+| `FRP_DOWNLOAD_URL` | 否 | - | frp 完整镜像压缩包 URL |
+| `FRP_DOWNLOAD_SHA256` | 直接镜像下载必填 | - | 直接镜像下载时用于校验 frp 压缩包 |
+| `FRP_VERSION` | 直接镜像下载必填 | - | 直接镜像下载时选择 frp 版本 |
 | `CLAUDE_PATH` | 否 | `claude` | Claude CLI 可执行文件路径 |
 | `CODEX_PATH` | 否 | `codex` | Codex CLI 可执行文件路径 |
 | `CC_WEB_CONFIG_DIR` | 否 | `./config` | 配置目录覆写（主要供隔离测试使用） |

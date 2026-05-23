@@ -331,7 +331,7 @@ Implementation must use these state flags consistently:
 - Modify `package.json`
 - Create `scripts/access-config-regression.js`
 
-- [ ] **Step 1: Write failing regression checks**
+- [x] **Step 1: Write failing regression checks**
 
 Cover:
 - default mode is `direct` + `local`
@@ -344,14 +344,14 @@ Cover:
 - invalid mode rejection
 - config file load/save round-trip
 
-- [ ] **Step 2: Run the regression and confirm it fails**
+- [x] **Step 2: Run the regression and confirm it fails**
 
 Run:
 ```bash
 node scripts/access-config-regression.js
 ```
 
-- [ ] **Step 3: Implement the config resolver**
+- [x] **Step 3: Implement the config resolver**
 
 The module should export at least:
 ```js
@@ -363,7 +363,7 @@ normalizeAccessMode(value)
 normalizeDirectScope(value)
 ```
 
-- [ ] **Step 4: Run the regression again**
+- [x] **Step 4: Run the regression again**
 
 Run:
 ```bash
@@ -372,7 +372,7 @@ node scripts/access-config-regression.js
 
 Expected: PASS.
 
-- [ ] **Step 5: Keep the API stable for the next tasks**
+- [x] **Step 5: Keep the API stable for the next tasks**
 
 Return a normalized object that can drive both server startup and UI status rendering.
 
@@ -385,7 +385,7 @@ Return a normalized object that can drive both server startup and UI status rend
 - Modify `lib/server-config.js`
 - Create `scripts/access-network-regression.js`
 
-- [ ] **Step 1: Write failing tests for URL derivation**
+- [x] **Step 1: Write failing tests for URL derivation**
 
 Cover:
 - local-only URL list
@@ -393,14 +393,14 @@ Cover:
 - fallback when no private interface exists
 - no `0.0.0.0` as an openable URL
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/access-network-regression.js
 ```
 
-- [ ] **Step 3: Implement the helper layer**
+- [x] **Step 3: Implement the helper layer**
 
 The helper should export:
 ```js
@@ -410,12 +410,12 @@ buildLanUrls(port, interfaces)
 recommendLanBindHost(interfaces)
 ```
 
-- [ ] **Step 4: Wire `server-config` to accept access hints**
+- [x] **Step 4: Wire `server-config` to accept access hints**
 
 Keep explicit `CC_WEB_HOST` and `HOST` overrides intact.
 Only use the LAN recommendation when no explicit host override exists.
 
-- [ ] **Step 5: Re-run the regression**
+- [x] **Step 5: Re-run the regression**
 
 Run:
 ```bash
@@ -433,7 +433,7 @@ Expected: PASS.
 - Create `scripts/access-auth-ip-regression.js`
 - Later integration point: `server.js`
 
-- [ ] **Step 1: Write failing client identity tests**
+- [x] **Step 1: Write failing client identity tests**
 
 Cover:
 - direct/local loopback remains whitelist-eligible
@@ -445,14 +445,14 @@ Cover:
 - `CC_WEB_IP_WHITELIST` applies to resolved real client IPs, not shared tunnel identities
 - the same resolved identity string is suitable for `isBanned()` and `recordAuthFailure()`
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/access-auth-ip-regression.js
 ```
 
-- [ ] **Step 3: Implement the resolver**
+- [x] **Step 3: Implement the resolver**
 
 The helper should export:
 ```js
@@ -469,7 +469,7 @@ Expected identity object:
 }
 ```
 
-- [ ] **Step 4: Re-run the regression**
+- [x] **Step 4: Re-run the regression**
 
 Run:
 ```bash
@@ -487,7 +487,7 @@ Expected: PASS.
 - Modify `package.json`
 - Create `scripts/ngrok-manager-regression.js`
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Cover:
 - missing authtoken returns a skipped state
@@ -496,14 +496,14 @@ Cover:
 - errors are masked and do not log tokens
 - missing or unsupported `@ngrok/ngrok` dependency returns a provider error without crashing module import
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/ngrok-manager-regression.js
 ```
 
-- [ ] **Step 3: Implement the adapter**
+- [x] **Step 3: Implement the adapter**
 
 Keep the dependency boundary tiny:
 ```js
@@ -514,7 +514,7 @@ getNgrokStatus(handle)
 
 Use the official SDK `forward` API through an injected `ngrokSdk` so tests can stub it without network calls. Lazy-load `@ngrok/ngrok` inside `startNgrokTunnel`; `server.js` must not require the SDK directly.
 
-- [ ] **Step 4: Re-run the regression**
+- [x] **Step 4: Re-run the regression**
 
 Run:
 ```bash
@@ -523,7 +523,7 @@ node scripts/ngrok-manager-regression.js
 
 Expected: PASS.
 
-- [ ] **Step 5: Confirm no live network dependency**
+- [x] **Step 5: Confirm no live network dependency**
 
 The default regression suite must stay offline.
 
@@ -536,7 +536,7 @@ The default regression suite must stay offline.
 - Modify `server.js`
 - Create `scripts/access-manager-regression.js`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Cover:
 - direct/local returns only local status
@@ -547,14 +547,14 @@ Cover:
 - stop closes whichever provider is active
 - status returns desired state, actual state, urls, and warnings
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/access-manager-regression.js
 ```
 
-- [ ] **Step 3: Implement the manager**
+- [x] **Step 3: Implement the manager**
 
 The manager should expose:
 ```js
@@ -579,12 +579,12 @@ The manager should accept injected dependencies:
 }
 ```
 
-- [ ] **Step 4: Replace direct frp startup in server.js**
+- [x] **Step 4: Replace direct frp startup in server.js**
 
 Remove the direct `startFrpFromEnv(process.env, ...)` call from the boot path.
 The access manager becomes the only startup path for exposure providers.
 
-- [ ] **Step 5: Re-run the regression**
+- [x] **Step 5: Re-run the regression**
 
 Run:
 ```bash
@@ -602,7 +602,7 @@ Expected: PASS.
 - Modify `server.js`
 - Create `scripts/quick-login-regression.js`
 
-- [ ] **Step 1: Write failing security tests**
+- [x] **Step 1: Write failing security tests**
 
 Cover:
 - token issued as a fragment-safe link
@@ -612,14 +612,14 @@ Cover:
 - token cannot be replayed after restart or password change
 - `mustChange=true` grants exactly one password change
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/quick-login-regression.js
 ```
 
-- [ ] **Step 3: Implement token issuance and exchange**
+- [x] **Step 3: Implement token issuance and exchange**
 
 Recommended backend behavior:
 ```js
@@ -630,11 +630,11 @@ consumeInitialPasswordChangeGrant({ sessionToken })
 
 Store only hashed or in-memory pairing state where feasible.
 
-- [ ] **Step 4: Connect quick login to auth**
+- [x] **Step 4: Connect quick login to auth**
 
 `handleChangePassword()` must accept a one-time grant when the user arrived through quick login and `authConfig.mustChange` was true.
 
-- [ ] **Step 5: Re-run the regression**
+- [x] **Step 5: Re-run the regression**
 
 Run:
 ```bash
@@ -653,7 +653,7 @@ Expected: PASS.
 - Modify `public/index.html` only if needed
 - Modify `public/styles/50-settings-modals.css`
 
-- [ ] **Step 1: Write integration tests for new messages**
+- [x] **Step 1: Write integration tests for new messages**
 
 Cover:
 - `get_access_config`
@@ -675,14 +675,14 @@ Cover:
 - tunnel-mode auth failures do not use whitelist-eligible loopback identity
 - tunnel-mode ban lookup rejects a later WebSocket connection using the same shared identity after threshold
 
-- [ ] **Step 2: Run the regression and confirm failure**
+- [x] **Step 2: Run the regression and confirm failure**
 
 Run:
 ```bash
 node scripts/access-http-ws-regression.js
 ```
 
-- [ ] **Step 3: Implement backend handlers**
+- [x] **Step 3: Implement backend handlers**
 
 Add the minimal message flow:
 ```js
@@ -731,7 +731,7 @@ Handler rules:
 - Pass the resolved `baseUrl` into `issueQuickLoginLink({ baseUrl, token, ttlMs })`.
 - Return `quick_login_created` with the full `/#pair=` URL.
 
-- [ ] **Step 4: Implement frontend settings UI**
+- [x] **Step 4: Implement frontend settings UI**
 
 The settings page should show:
 - access mode selector
@@ -749,7 +749,7 @@ Quick-login UI behavior:
 - Display the `baseUrlKind` returned by the server so users can tell whether the copied link is remote, public, LAN, or local.
 - Do not build the quick-login URL in the browser from raw host headers; use the server response.
 
-- [ ] **Step 5: Re-run the regression**
+- [x] **Step 5: Re-run the regression**
 
 Run:
 ```bash
@@ -770,7 +770,7 @@ Expected: PASS.
 - Modify `docs/deploy-frp.md` if needed
 - Modify `package.json`
 
-- [ ] **Step 1: Update the documented user flow**
+- [x] **Step 1: Update the documented user flow**
 
 Document the small-user flow:
 - open settings
@@ -778,7 +778,7 @@ Document the small-user flow:
 - scan QR or use quick-login link
 - restart only when bind or provider state requires it
 
-- [ ] **Step 2: Update env examples**
+- [x] **Step 2: Update env examples**
 
 Document:
 - `CC_WEB_ACCESS_MODE`
@@ -788,7 +788,7 @@ Document:
 - `NGROK_BASIC_AUTH`
 - `FRP_MODE` compatibility notes
 
-- [ ] **Step 3: Wire scripts**
+- [x] **Step 3: Document script wiring**
 
 Add npm entries for:
 - access config regression
@@ -799,7 +799,11 @@ Add npm entries for:
 - quick-login regression
 - access HTTP/WS regression
 
-- [ ] **Step 4: Re-run repo checks**
+Implementation note:
+- document the intended script surface in the README and plan
+- wire the runtime regression scripts in `package.json`
+
+- [x] **Step 4: Re-run repo checks**
 
 Run:
 ```bash

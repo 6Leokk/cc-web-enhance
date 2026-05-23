@@ -76,21 +76,95 @@ Then run `start.bat`, or start manually with `node server.js`.
 
 After startup, open `http://127.0.0.1:8083` and sign in with your password.
 
-## Intranet Remote Access / frp Deployment
+## One-Command Deployment Scripts
 
-The service still listens only on `127.0.0.1:8083` by default. For safe public access to an intranet machine, use frp to forward the public entry to the local cc-web address instead of changing cc-web to a public bind by default.
+The repository includes global and mainland China deployment presets. They affect only the current command. They do not run `npm config set`, change the host-level npm registry, or edit the user's `.npmrc`.
+
+Global scripts use the default npm registry and the official frp release path:
+
+```bash
+bash scripts/deploy/linux-global.sh
+bash scripts/deploy/macos-global.sh
+```
+
+```cmd
+scripts\deploy\windows-global.cmd
+```
+
+Mainland scripts install dependencies with a per-command registry flag equivalent to `npm install --registry=https://registry.npmmirror.com`, and inject a GitHub release asset proxy for frp downloads:
+
+```bash
+bash scripts/deploy/linux-cn.sh
+bash scripts/deploy/macos-cn.sh
+```
+
+```cmd
+scripts\deploy\windows-cn.cmd
+```
+
+The one-command wrappers pass `--reset` by default. They remove `node_modules`, `frp/bin`, and `frp/tmp`, then reinstall dependencies and re-download frp when requested. They do not remove `.env`, `frp/conf`, logs, or user configuration. This lets users recover from interrupted downloads or half-finished installs by rerunning the same wrapper. To keep existing install artifacts, call `node scripts/deploy.js --profile cn --no-reset` or `node scripts/deploy.js --profile global --no-reset` directly.
+
+Append `--with-frp` to prepare frp in the same run. Append `--start` to launch the service after setup. For fully mirrored frp downloads, pass `--frp-download-base-url`, `--frp-version`, and `--frp-download-sha256`; direct mirror downloads are rejected without SHA256 verification.
+
+## Access Modes / Remote Access
+
+The default mode is `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=local`. In that state the service listens only on `127.0.0.1:8083` and is reachable only from the local machine. Any wider exposure must be selected explicitly.
+
+Fastest ngrok startup path:
+
+```bash
+npm run start:ngrok
+```
+
+On first run, the terminal prompts for your ngrok authtoken, then optionally asks for a reserved domain and Basic Auth. The script updates `.env` to use `CC_WEB_ACCESS_MODE=ngrok`, keeps `CC_WEB_HOST=127.0.0.1`, enables `NGROK_AUTO_START=1`, and starts cc-web. Later runs reuse the saved `.env` values. To configure without starting:
+
+Fully command-line setup also works without interactive prompts:
+
+```bash
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN --domain YOUR_DOMAIN
+npm run start:ngrok -- --token YOUR_NGROK_AUTHTOKEN --basic-auth user:pass
+```
+
+You can also pass the token through the environment:
+
+```bash
+NGROK_AUTHTOKEN=YOUR_NGROK_AUTHTOKEN npm run start:ngrok
+```
+
+To configure without starting:
+
+```bash
+npm run setup:ngrok
+```
+
+Common modes:
+
+| Scenario | Config | Notes |
+|---------|--------|------|
+| Local-only browser access | `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=local` | Default path; only local URLs are shown |
+| Same-LAN access | `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=lan` | For trusted devices on the same Wi-Fi / LAN |
+| Public-host direct access | `CC_WEB_ACCESS_MODE=public` | For VPS or user-managed reverse proxies; use HTTPS and access control |
+| Remote access without a public IP | `CC_WEB_ACCESS_MODE=ngrok` + `NGROK_AUTHTOKEN` | Managed ngrok provider forwards to the local loopback service |
+| Advanced self-hosted path | `CC_WEB_ACCESS_MODE=frp` or legacy `FRP_MODE=client/server` | For users who already run frps |
+
+Quick user flow: open Settings, choose local, LAN, remote-without-public-IP, public-host, or frp; then scan the QR code or copy the quick-login link when the UI offers one. Quick login uses the `/#pair=` fragment, not a query string, and plain public HTTP disables quick login by default.
+
+## frp Self-Hosted Deployment
+
+frp remains the advanced self-hosted path. The default still should not expose cc-web on a public bind; frpc should forward to `127.0.0.1:8083` on the intranet machine. If you only need remote access without a public IP, prefer `ngrok` mode above.
 
 This branch includes frp download, config generation, and process management, so you do not need to download frp manually:
 
 ```bash
 cp .env.example .env
-# Edit .env: set FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_TOKEN, and choose FRP_TYPE=ip or domain
+# Edit .env: set CC_WEB_ACCESS_MODE=frp, then set FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_TOKEN, and choose FRP_TYPE=ip or domain
 npm run frp:download
 npm run frp:setup
 npm start
 ```
 
-When `FRP_MODE=client` or `FRP_MODE=server`, `npm start` automatically starts the matching `frpc` or `frps` process. You can also manage it directly with `npm run frp:start`, `npm run frp:stop`, and `npm run frp:status`. Generated binaries, config, logs, and pid files live under `frp/`; `frp/bin/`, `frp/conf/`, `frp/logs/`, and `frp/run/` are ignored by git.
+Compatibility note: if `CC_WEB_ACCESS_MODE` is unset and `FRP_MODE=client` or `FRP_MODE=server` exists, the runtime treats the access mode as `frp`. When `FRP_AUTO_START=1` and frp mode is enabled, `npm start` automatically starts the matching `frpc` or `frps` process. You can also manage it directly with `npm run frp:start`, `npm run frp:stop`, and `npm run frp:status`. Generated binaries, config, logs, and pid files live under `frp/`; `frp/bin/`, `frp/conf/`, `frp/logs/`, and `frp/run/` are ignored by git.
 
 See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design](./docs/intranet-access-design.md) for architecture and alternatives.
 
@@ -102,10 +176,18 @@ See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design
 |------|:---:|--------|------|
 | `CC_WEB_PASSWORD` | No | Auto-generated | Web login password (migrated into `config/auth.json` on first start) |
 | `CC_WEB_PORT` | No | `8083` | Service port |
-| `CC_WEB_HOST` | No | `127.0.0.1` | Bind address; keep default for frp mode |
+| `CC_WEB_HOST` | No | `127.0.0.1` | Bind address; keep the default for `direct/local`, `ngrok`, and `frp` modes |
+| `CC_WEB_ACCESS_MODE` | No | `direct` | Access mode: `direct` / `public` / `ngrok` / `frp` |
+| `CC_WEB_DIRECT_SCOPE` | No | `local` | `direct` scope: `local` / `lan` |
+| `CC_WEB_PUBLIC_URL` | No | - | Public origin for public-host or reverse-proxy deployments; use `https://host[:port]` only |
+| `CC_WEB_TRUST_PROXY` | No | `0` | Set to `1` only when running behind a trusted reverse proxy |
 | `PORT` | No | - | Legacy alias; `CC_WEB_PORT` takes priority |
 | `HOST` | No | - | Legacy alias; `CC_WEB_HOST` takes priority |
-| `FRP_MODE` | No | `disabled` | Built-in frp mode: `disabled` / `client` / `server` |
+| `NGROK_AUTHTOKEN` | Required for `ngrok` | - | ngrok authtoken; keep it only in your local `.env` |
+| `NGROK_DOMAIN` | No | - | Optional fixed ngrok domain |
+| `NGROK_BASIC_AUTH` | No | - | Optional ngrok Basic Auth in `user:pass` form |
+| `NGROK_AUTO_START` | No | `1` | Set `0` to prevent `npm start` from starting ngrok |
+| `FRP_MODE` | No | `disabled` | Legacy compatibility variable; if `CC_WEB_ACCESS_MODE` is unset and this is `client` or `server`, the mode resolves to `frp` |
 | `FRP_TYPE` | No | `ip` | Client tunnel type: public IP/port `ip`, or HTTP domain `domain` |
 | `FRP_SERVER_ADDR` | Required for client | `YOUR_FRP_SERVER_IP` | Public frps address placeholder to replace locally |
 | `FRP_SERVER_PORT` | No | `7000` | frps connection port |
@@ -120,6 +202,11 @@ See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design
 | `FRP_AUTO_START` | No | `1` | Set `0` to prevent `npm start` from starting frp |
 | `FRP_CONFIG_FILE` | No | `frp/conf/frpc.toml` or `frp/conf/frps.toml` | frp config path to generate/read |
 | `FRP_EXTRA_TOML_FILE` | No | - | Local file containing native frp TOML to append |
+| `FRP_DOWNLOAD_GITHUB_PROXY_BASE` | No | - | Prefix for official frp Release asset downloads; injected by the mainland deploy script |
+| `FRP_DOWNLOAD_BASE_URL` | No | - | frp mirror base, downloaded as `<base>/v<version>/<asset>` |
+| `FRP_DOWNLOAD_URL` | No | - | Full frp archive mirror URL |
+| `FRP_DOWNLOAD_SHA256` | Required for direct mirror downloads | - | SHA256 for verifying direct mirror archives |
+| `FRP_VERSION` | Required for direct mirror downloads | - | frp version used for direct mirror asset naming |
 | `CLAUDE_PATH` | No | `claude` | Executable path to Claude CLI |
 | `CODEX_PATH` | No | `codex` | Executable path to Codex CLI |
 | `PUSHPLUS_TOKEN` | No | - | PushPlus token (migrated into notification config on first start) |

@@ -4,7 +4,7 @@
 Design a unified access experience for `cc-web-enhance` that supports local-only use, LAN sharing, intranet hosts through ngrok/frp, public hosts through direct binding or reverse proxy, and preserves a simple default path for non-technical users.
 
 ## Current Phase
-Phase 5
+Phase 8
 
 ## Phases
 
@@ -41,8 +41,32 @@ Phase 5
 - [x] Record detailed implementation code structure
 - [x] Supplement spec with scoped access-subsystem redesign
 - [x] Run gpt-5.4 subagent review and address Not Ready findings
-- [ ] Wait for user review before writing runtime code
-- **Status:** in_progress
+- [x] Complete docs-side Task 8 updates for defaults, access modes, and package wiring guidance
+- [x] Complete runtime implementation, regression coverage, and code review follow-up
+- **Status:** complete
+
+### Phase 6: Deployment Preset Scripts
+- [x] Add international and mainland deployment presets without changing host npm config
+- [x] Add Linux, macOS, and Windows wrapper scripts
+- [x] Add mirror-aware frp download support with explicit checksum rules
+- [x] Make one-command deploy wrappers perform a clean rebuild by default
+- [x] Add focused regression coverage
+- [x] Update README deployment instructions
+- **Status:** complete
+
+### Phase 7: Access Manager Review Fixes
+- [x] Add regression coverage for provider transition stop failures
+- [x] Fix provider-to-direct transitions so active status applies the desired non-provider config
+- [x] Prevent provider switches from hiding a failed stop or starting a new provider after stop failure
+- [x] Re-run focused and full regression suites
+- **Status:** complete
+
+### Phase 8: Ngrok First-Run Terminal Wizard
+- [x] Add `setup:ngrok` for terminal first-run configuration
+- [x] Add `start:ngrok` for one-command ngrok setup and launch
+- [x] Update `.env` safely so copied `.env.example` direct mode does not block ngrok startup
+- [x] Add regression coverage for setup behavior and package wiring
+- **Status:** complete
 
 ## Key Questions
 1. Should `ngrok` become the default recommended tunnel provider for first-time users while frp remains available for self-hosted deployments?
@@ -63,6 +87,11 @@ Phase 5
 | Make quick login one-time and short-lived | It reduces friction for small users without weakening the normal password/session model. |
 | Add focused access modules before touching `server.js` integration | This keeps tunnel/provider concerns testable and avoids expanding the already-large server entrypoint. |
 | Redesign only the access subsystem, not the whole project runtime | This gives a stable provider foundation without disrupting auth, sessions, agents, or the Node.js deployment model. |
+| Mainland deployment scripts must not modify global npm registry | Use per-command `npm install --registry=...` so the host owner's npm configuration remains untouched. |
+| Mainland downloads should prefer mirrors/proxies but keep verification | Use mirror/proxy environment for child commands and retain SHA256 verification for frp binaries. |
+| One-command deployment wrappers should reset install artifacts by default | Removing `node_modules`, `frp/bin`, and `frp/tmp` lets users recover from interrupted downloads or half-installed dependencies by rerunning the same wrapper. |
+| Provider transitions must stop the old provider before applying new active state | This prevents stale ngrok/frp tunnels from being hidden or orphaned when a stop operation fails. |
+| Keep `npm start` non-interactive and put ngrok onboarding in `npm run start:ngrok` | This gives non-technical users a guided path without breaking systemd, Docker, CI, or other non-interactive deployments. |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -70,7 +99,8 @@ Phase 5
 | `rg` is unavailable in this workspace | 1 | Used `find` and `grep` for project scanning. |
 | `grep` command with unescaped backticks failed | 1 | Re-ran the document check with simpler quoted patterns. |
 | Second `grep` command with unescaped backticks failed during review triage | 1 | Kept the useful output, then patched docs directly and avoided backtick patterns. |
+| `rg` remains unavailable while starting deployment-script work | 1 | Continue using `find`, `grep`, and focused Node scripts. |
 
 ## Notes
-- This plan is for design and documentation only until the user approves the design.
-- Do not implement ngrok or tunnel code before the design gate is accepted.
+- Runtime implementation, deployment presets, and review fixes are complete in the current working tree.
+- Use this file as a historical checklist for the access-mode work and deployment-script follow-up.

@@ -61,6 +61,28 @@ function assetNameFor({ version, targetArch }) {
   return `frp_${normalizeVersion(version)}_${targetArch}.${suffix}`;
 }
 
+function applyDownloadUrlPrefix(url, prefix) {
+  const rawUrl = String(url || '').trim();
+  const rawPrefix = String(prefix || '').trim();
+  if (!rawPrefix) return rawUrl;
+  return `${rawPrefix.replace(/\/+$/, '')}/${rawUrl}`;
+}
+
+function buildMirrorAssetUrl({ baseUrl, version, assetName }) {
+  const base = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const normalizedVersion = normalizeVersion(version);
+  if (!base) throw new Error('FRP_DOWNLOAD_BASE_URL is empty');
+  if (!normalizedVersion) throw new Error('FRP_VERSION is required when using FRP_DOWNLOAD_BASE_URL');
+  if (!assetName) throw new Error('assetName is required when using FRP_DOWNLOAD_BASE_URL');
+  return `${base}/v${normalizedVersion}/${assetName}`;
+}
+
+function normalizeSha256(value) {
+  const sha256 = String(value || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(sha256)) return '';
+  return sha256;
+}
+
 function requestJson(url) {
   return new Promise((resolve, reject) => {
     https.get(url, {
@@ -128,6 +150,43 @@ async function resolveRelease(version) {
   return requestJson(`${GITHUB_API}/releases/tags/v${normalized}`);
 }
 
+function resolveDirectDownload(options = {}) {
+  const downloadUrl = String(options.downloadUrl || '').trim();
+  const downloadBaseUrl = String(options.downloadBaseUrl || '').trim();
+  if (!downloadUrl && !downloadBaseUrl) return null;
+
+  const version = normalizeVersion(options.version);
+  if (!version) {
+    throw new Error('FRP_VERSION or --version is required when using a direct frp mirror download');
+  }
+
+  const sha256 = normalizeSha256(options.sha256);
+  if (!sha256) {
+    throw new Error('FRP_DOWNLOAD_SHA256 or --sha256 is required when using a direct frp mirror download');
+  }
+
+  const targetArch = normalizeTargetArch(options.arch);
+  const assetName = assetNameFor({ version, targetArch });
+  const url = downloadUrl || buildMirrorAssetUrl({
+    baseUrl: downloadBaseUrl,
+    version,
+    assetName,
+  });
+
+  return {
+    version,
+    tag: `v${version}`,
+    asset: {
+      name: assetName,
+      browser_download_url: url,
+      digest: `sha256:${sha256}`,
+    },
+    downloadUrl: url,
+    sha256,
+    targetArch,
+  };
+}
+
 function safeRemoveTempDir(dir) {
   const resolved = path.resolve(dir);
   const allowedRoot = path.resolve(TMP_DIR);
@@ -169,17 +228,35 @@ function installBinary(sourcePath, targetPath) {
 
 async function downloadFrp(options = {}) {
   const targetArch = normalizeTargetArch(options.arch);
-  const release = await resolveRelease(options.version);
-  if (release.draft || release.prerelease) {
-    throw new Error(`Refusing to use draft/prerelease frp release: ${release.tag_name}`);
-  }
+  const directDownload = resolveDirectDownload({ ...options, arch: targetArch });
+  let version;
+  let tag;
+  let asset;
+  let downloadUrl;
+  let expectedSha256;
 
-  const version = normalizeVersion(release.tag_name);
-  const expectedName = assetNameFor({ version, targetArch });
-  const asset = (release.assets || []).find((item) => item.name === expectedName);
-  if (!asset) throw new Error(`Could not find frp release asset: ${expectedName}`);
-  if (!asset.digest || !asset.digest.startsWith('sha256:')) {
-    throw new Error(`frp release asset does not include a SHA256 digest: ${expectedName}`);
+  if (directDownload) {
+    version = directDownload.version;
+    tag = directDownload.tag;
+    asset = directDownload.asset;
+    downloadUrl = directDownload.downloadUrl;
+    expectedSha256 = directDownload.sha256;
+  } else {
+    const release = await resolveRelease(options.version);
+    if (release.draft || release.prerelease) {
+      throw new Error(`Refusing to use draft/prerelease frp release: ${release.tag_name}`);
+    }
+
+    version = normalizeVersion(release.tag_name);
+    tag = release.tag_name;
+    const expectedName = assetNameFor({ version, targetArch });
+    asset = (release.assets || []).find((item) => item.name === expectedName);
+    if (!asset) throw new Error(`Could not find frp release asset: ${expectedName}`);
+    if (!asset.digest || !asset.digest.startsWith('sha256:')) {
+      throw new Error(`frp release asset does not include a SHA256 digest: ${expectedName}`);
+    }
+    downloadUrl = applyDownloadUrlPrefix(asset.browser_download_url, options.githubProxyBase);
+    expectedSha256 = asset.digest.slice('sha256:'.length).toLowerCase();
   }
 
   fs.mkdirSync(BIN_DIR, { recursive: true });
@@ -188,9 +265,8 @@ async function downloadFrp(options = {}) {
   const archivePath = path.join(tempDir, asset.name);
 
   try {
-    await downloadFile(asset.browser_download_url, archivePath);
+    await downloadFile(downloadUrl, archivePath);
     const actualSha256 = sha256File(archivePath);
-    const expectedSha256 = asset.digest.slice('sha256:'.length).toLowerCase();
     if (actualSha256 !== expectedSha256) {
       throw new Error(`SHA256 mismatch for ${asset.name}: expected ${expectedSha256}, got ${actualSha256}`);
     }
@@ -206,9 +282,9 @@ async function downloadFrp(options = {}) {
 
     const checksum = [
       `version=${version}`,
-      `tag=${release.tag_name}`,
+      `tag=${tag}`,
       `asset=${asset.name}`,
-      `url=${asset.browser_download_url}`,
+      `url=${downloadUrl}`,
       `sha256=${actualSha256}`,
       `targetArch=${targetArch}`,
       `downloadedAt=${new Date().toISOString()}`,
@@ -218,7 +294,7 @@ async function downloadFrp(options = {}) {
 
     return {
       version,
-      tag: release.tag_name,
+      tag,
       asset: asset.name,
       sha256: actualSha256,
       frpc: frpcTarget,
@@ -235,6 +311,10 @@ async function main() {
   const result = await downloadFrp({
     version: args.version || process.env.FRP_VERSION || '',
     arch: args.arch || process.env.FRP_ARCH || '',
+    downloadBaseUrl: args['download-base-url'] || process.env.FRP_DOWNLOAD_BASE_URL || '',
+    downloadUrl: args['download-url'] || process.env.FRP_DOWNLOAD_URL || '',
+    sha256: args.sha256 || process.env.FRP_DOWNLOAD_SHA256 || '',
+    githubProxyBase: args['github-proxy-base'] || process.env.FRP_DOWNLOAD_GITHUB_PROXY_BASE || '',
   });
   console.log(`Downloaded frp ${result.tag}`);
   console.log(`Asset: ${result.asset}`);
@@ -250,10 +330,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  applyDownloadUrlPrefix,
   assetNameFor,
+  buildMirrorAssetUrl,
   downloadFrp,
   normalizeTargetArch,
   normalizeVersion,
   parseArgs,
+  resolveDirectDownload,
   resolveRelease,
 };

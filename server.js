@@ -5,13 +5,18 @@ const crypto = require('crypto');
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
-const { resolveAccessConfig } = require('./lib/access-config');
+const {
+  maskAccessConfig,
+  resolveAccessConfig,
+  saveAccessConfig,
+} = require('./lib/access-config');
 const {
   isAccessIdentityWhitelisted,
   resolveAuthClientIdentity,
 } = require('./lib/access-auth-ip');
+const { createAccessManager } = require('./lib/access-manager');
+const { createQuickLoginStore } = require('./lib/quick-login');
 const { resolveServerBindConfig } = require('./lib/server-config');
-const { startFrpFromEnv, stopFrpHandle } = require('./lib/frp-manager');
 const { createAgentRuntime } = require('./lib/agent-runtime');
 const { parseClaudeTranscriptLines } = require('./lib/claude-transcript');
 const { applyCodexParsedTelemetryToSession } = require('./lib/codex-telemetry');
@@ -546,6 +551,7 @@ function ensureAuthLoaded() {
 }
 
 const activeTokens = new Map(); // token -> lastActive timestamp
+const quickLoginStore = createQuickLoginStore();
 
 const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -1391,12 +1397,217 @@ function extractBearerToken(req) {
   return m ? m[1] : '';
 }
 
-function jsonResponse(res, statusCode, payload) {
+function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-cache',
+    ...extraHeaders,
   });
   res.end(JSON.stringify(payload));
+}
+
+const QUICK_LOGIN_HEADERS = {
+  'Cache-Control': 'no-store',
+  'Referrer-Policy': 'no-referrer',
+};
+
+function readJsonBody(req, options = {}) {
+  const maxBytes = options.maxBytes || 16 * 1024;
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        reject(new Error('request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8').trim();
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error('invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function getCurrentAccessStatus() {
+  if (accessManager) return accessManager.getStatus();
+  return createAccessManager({
+    env: process.env,
+    host: HOST,
+    port: PORT,
+    accessConfig: ACCESS_CONFIG,
+    networkInterfaces: os.networkInterfaces(),
+  }).getStatus();
+}
+
+function sendAccessConfig(ws, payload = {}) {
+  const source = ACCESS_CONFIG.source || {};
+  const lockedFields = ACCESS_CONFIG.lockedFields || [];
+  wsSend(ws, {
+    type: 'access_config',
+    config: {
+      ...maskAccessConfig(ACCESS_CONFIG),
+      source,
+      lockedFields,
+    },
+    source,
+    lockedFields,
+    ...payload,
+  });
+}
+
+function normalizeProviderName(value) {
+  const provider = String(value || '').trim();
+  return provider === 'ngrok' || provider === 'frp' ? provider : '';
+}
+
+function sendAccessStatus(ws, status = getCurrentAccessStatus()) {
+  wsSend(ws, { type: 'access_status', status });
+}
+
+function quickLoginFailure(ws, reason, status = getCurrentAccessStatus()) {
+  wsSend(ws, {
+    type: 'quick_login_created',
+    ok: false,
+    reason,
+    message: quickLoginReasonMessage(reason),
+    status,
+  });
+}
+
+function quickLoginReasonMessage(reason) {
+  switch (reason) {
+    case 'public_http_disabled': return 'Quick login is disabled for plain public HTTP.';
+    case 'provider_not_running': return 'Quick login requires the selected provider to be running.';
+    case 'no_eligible_url': return 'No eligible URL is available for quick login.';
+    case 'auth_not_ready': return 'Authentication is not ready.';
+    default: return 'Quick login could not be created.';
+  }
+}
+
+function chooseQuickLoginBase(status, preferredUrlKind) {
+  const urls = status?.urls || {};
+  const kinds = ['remote', 'public', 'lan', 'local'];
+  const preferred = String(preferredUrlKind || '').trim();
+  const orderedKinds = preferred ? [preferred] : kinds;
+  for (const kind of orderedKinds) {
+    if (!kinds.includes(kind)) return null;
+    const list = Array.isArray(urls[kind]) ? urls[kind] : [];
+    if (list.length > 0) return { kind, baseUrl: list[0] };
+  }
+  return null;
+}
+
+async function handleSaveAccessConfig(ws, msg) {
+  try {
+    const clearFields = Array.isArray(msg.clearFields)
+      ? msg.clearFields
+      : Array.isArray(msg.config?.clearFields)
+        ? msg.config.clearFields
+        : [];
+    saveAccessConfig(CONFIG_DIR, msg.config || {}, {
+      clearFields,
+      env: process.env,
+    });
+    ACCESS_CONFIG = resolveAccessConfig(process.env, { configDir: CONFIG_DIR });
+    const status = accessManager ? await accessManager.reload(ACCESS_CONFIG) : getCurrentAccessStatus();
+    wsSend(ws, {
+      type: 'access_config_saved',
+      ok: true,
+      config: {
+        ...maskAccessConfig(ACCESS_CONFIG),
+        source: ACCESS_CONFIG.source || {},
+        lockedFields: ACCESS_CONFIG.lockedFields || [],
+      },
+      source: ACCESS_CONFIG.source || {},
+      lockedFields: ACCESS_CONFIG.lockedFields || [],
+      status,
+    });
+    sendAccessConfig(ws);
+    sendAccessStatus(ws, status);
+  } catch (err) {
+    wsSend(ws, {
+      type: 'access_config_saved',
+      ok: false,
+      message: err.message,
+    });
+  }
+}
+
+async function handleAccessProviderAction(ws, action, requestedProvider) {
+  try {
+    const normalizedProvider = normalizeProviderName(requestedProvider);
+    const currentStatus = getCurrentAccessStatus();
+    if (normalizedProvider && normalizedProvider !== currentStatus.desiredMode && normalizedProvider !== currentStatus.provider) {
+      return wsSend(ws, {
+        type: 'access_action_result',
+        ok: false,
+        action,
+        provider: currentStatus.provider,
+        message: `Requested provider ${normalizedProvider} does not match current access mode ${currentStatus.desiredMode}`,
+        status: currentStatus,
+      });
+    }
+    const status = action === 'stop'
+      ? await accessManager.stop()
+      : await accessManager.start({ manual: true });
+    wsSend(ws, {
+      type: 'access_action_result',
+      ok: true,
+      action,
+      provider: status.provider,
+      status,
+    });
+    sendAccessStatus(ws, status);
+  } catch (err) {
+    const status = getCurrentAccessStatus();
+    wsSend(ws, {
+      type: 'access_action_result',
+      ok: false,
+      action,
+      provider: status.provider,
+      message: err.message,
+      status,
+    });
+    sendAccessStatus(ws, status);
+  }
+}
+
+function handleCreateQuickLogin(ws, msg) {
+  ensureAuthLoaded();
+  const status = getCurrentAccessStatus();
+  const selected = chooseQuickLoginBase(status, msg.preferredUrlKind);
+  if (!selected) {
+    return quickLoginFailure(ws, 'no_eligible_url', status);
+  }
+  if (!status.quickLogin?.allowed) {
+    return quickLoginFailure(ws, status.quickLogin?.reason || 'no_eligible_url', status);
+  }
+  try {
+    const issued = quickLoginStore.issueLink({
+      baseUrl: selected.baseUrl,
+      baseUrlKind: selected.kind,
+      mustChangePassword: !!authConfig.mustChange,
+    });
+    wsSend(ws, { type: 'quick_login_created', ...issued });
+  } catch (err) {
+    wsSend(ws, {
+      type: 'quick_login_created',
+      ok: false,
+      reason: 'create_failed',
+      message: err.message,
+      status,
+    });
+  }
 }
 
 const INITIAL_HISTORY_COUNT = 12;
@@ -2251,6 +2462,33 @@ function recoverProcesses() {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (req.method === 'POST' && url.pathname === '/api/quick-login/exchange') {
+    readJsonBody(req).then((body) => {
+      const result = quickLoginStore.exchange(String(body?.token || ''));
+      if (!result.ok) {
+        return jsonResponse(res, 410, {
+          ok: false,
+          reason: result.reason || 'invalid_or_expired',
+          message: result.message || 'Quick login link is invalid or expired.',
+        }, QUICK_LOGIN_HEADERS);
+      }
+      activeTokens.set(result.token, Date.now());
+      return jsonResponse(res, 200, {
+        ok: true,
+        sessionToken: result.token,
+        token: result.token,
+        mustChangePassword: !!result.mustChangePassword,
+      }, QUICK_LOGIN_HEADERS);
+    }).catch((err) => {
+      jsonResponse(res, 400, {
+        ok: false,
+        reason: 'bad_request',
+        message: err.message,
+      }, QUICK_LOGIN_HEADERS);
+    });
+    return;
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/attachments') {
     const token = extractBearerToken(req);
     if (!isTokenValid(token)) {
@@ -2489,6 +2727,26 @@ wss.on('connection', (ws, req) => {
       case 'save_ui_config':
         handleSaveUiConfig(ws, msg.config);
         break;
+      case 'get_access_config':
+        sendAccessConfig(ws);
+        break;
+      case 'save_access_config':
+        handleSaveAccessConfig(ws, msg).catch((err) => {
+          wsSend(ws, { type: 'access_config_saved', ok: false, message: err.message });
+        });
+        break;
+      case 'get_access_status':
+        sendAccessStatus(ws);
+        break;
+      case 'start_access_provider':
+        handleAccessProviderAction(ws, 'start', msg.provider);
+        break;
+      case 'stop_access_provider':
+        handleAccessProviderAction(ws, 'stop', msg.provider);
+        break;
+      case 'create_quick_login':
+        handleCreateQuickLogin(ws, msg);
+        break;
       case 'test_notify':
         handleTestNotify(ws);
         break;
@@ -2622,15 +2880,20 @@ function handleTestNotify(ws) {
 function handleChangePassword(ws, msg, currentToken) {
   const { currentPassword, newPassword } = msg;
 
-  // Validate current password
-  if (currentPassword !== PASSWORD) {
-    return wsSend(ws, { type: 'password_changed', success: false, message: '当前密码错误' });
-  }
-
   // Validate new password strength
   const strength = validatePasswordStrength(newPassword);
   if (!strength.valid) {
     return wsSend(ws, { type: 'password_changed', success: false, message: strength.message });
+  }
+
+  const passwordMatches = currentPassword === PASSWORD;
+  const hasInitialGrant = !passwordMatches
+    && !!authConfig?.mustChange
+    && quickLoginStore.consumeInitialPasswordChangeGrant(currentToken);
+
+  // Validate current password
+  if (!passwordMatches && !hasInitialGrant) {
+    return wsSend(ws, { type: 'password_changed', success: false, message: '当前密码错误' });
   }
 
   // Save new password
@@ -2641,6 +2904,7 @@ function handleChangePassword(ws, msg, currentToken) {
 
   // Clear all tokens (force all sessions to re-login)
   activeTokens.clear();
+  quickLoginStore.clear();
 
   // Generate new token for current connection
   const newToken = crypto.randomBytes(32).toString('hex');
@@ -4347,12 +4611,18 @@ setInterval(() => {
 plog('INFO', 'server_start', { port: PORT });
 
 let shuttingDown = false;
-let managedFrp = null;
+let accessManager = null;
 
-function shutdown(reason, exitCode = 0) {
+async function shutdown(reason, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   plog('INFO', 'server_shutdown_start', { reason, activeProcesses: activeProcesses.size });
+
+  const forceTimer = setTimeout(() => {
+    plog('WARN', 'server_shutdown_forced', { reason });
+    process.exit(exitCode);
+  }, 5000);
+  forceTimer.unref?.();
 
   try {
     for (const client of wss.clients) {
@@ -4368,19 +4638,13 @@ function shutdown(reason, exitCode = 0) {
   } catch {}
 
   try {
-    if (managedFrp) {
-      stopFrpHandle(managedFrp);
-      managedFrp = null;
+    if (accessManager) {
+      await Promise.resolve(accessManager.stop());
+      accessManager = null;
     }
   } catch (err) {
-    plog('WARN', 'frp_shutdown_error', { error: err.message });
+    plog('WARN', 'access_manager_shutdown_error', { error: err.message });
   }
-
-  const forceTimer = setTimeout(() => {
-    plog('WARN', 'server_shutdown_forced', { reason });
-    process.exit(exitCode);
-  }, 5000);
-  forceTimer.unref?.();
 
   try {
     server.close(() => {
@@ -4515,20 +4779,29 @@ process.on('unhandledRejection', (reason) => {
   plog('ERROR', 'unhandled_rejection', { error: reason?.stack || reason?.message || String(reason) });
 });
 
-try {
-  managedFrp = startFrpFromEnv(process.env, {
-    logger: (message) => {
-      plog('INFO', 'frp_manager', { message });
-      console.log(`[frp] ${message}`);
-    },
-  });
-} catch (err) {
-  plog('WARN', 'frp_auto_start_error', { error: err.message });
-  console.error(`[frp] auto-start failed: ${err.message}`);
-}
-
 server.listen(PORT, HOST, () => {
   ensureAuthLoaded();
+  accessManager = createAccessManager({
+    env: process.env,
+    host: HOST,
+    port: PORT,
+    accessConfig: ACCESS_CONFIG,
+    networkInterfaces: os.networkInterfaces(),
+    logger: (message) => {
+      plog('INFO', 'access_manager', { message });
+      console.log(`[access] ${message}`);
+    },
+  });
+  Promise.resolve(accessManager.start()).then((status) => {
+    for (const url of status.urls.local || []) console.log(`Local access: ${url}`);
+    for (const url of status.urls.lan || []) console.log(`LAN access: ${url}`);
+    for (const url of status.urls.remote || []) console.log(`Remote access: ${url}`);
+    for (const warning of status.warnings || []) console.warn(`[access] ${warning}`);
+    for (const error of status.errors || []) console.error(`[access] ${error}`);
+  }).catch((err) => {
+    plog('WARN', 'access_manager_start_error', { error: err.message });
+    console.error(`[access] start failed: ${err.message}`);
+  });
   console.log(`CC-Web server listening on ${HOST}:${PORT}`);
   if (HOST === '0.0.0.0' || HOST === '::') {
     for (const url of getLanAccessUrls(PORT)) {
