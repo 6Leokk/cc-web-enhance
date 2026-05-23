@@ -2,7 +2,7 @@
 
 A lightweight enhanced browser interface for Claude Code and Codex, designed to keep each agent close to its native CLI workflow while sharing the same web shell.
 
-![Node.js](https://img.shields.io/badge/Node.js-22+-339933?logo=node.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)
 ![License](https://img.shields.io/badge/License-See%20NOTICE-lightgrey)
 
 [中文 README](./README.md) | [Notice](./NOTICE.md)
@@ -12,7 +12,7 @@ This repository is an enhanced derivative of [ZgDaniel/cc-web](https://github.co
 ## Source and License
 
 - Upstream project: [`ZgDaniel/cc-web`](https://github.com/ZgDaniel/cc-web)
-- Enhanced repository name: `cc-web-enhance`
+- Enhanced repository: [`6Leokk/cc-web-enhance`](https://github.com/6Leokk/cc-web-enhance)
 - This repository preserves upstream source attribution and acknowledgements. See [NOTICE.md](./NOTICE.md).
 - The upstream README displays an MIT badge, but GitHub license metadata currently does not expose a machine-readable upstream `LICENSE` file. This repository does not add a new license claim on top of upstream. Review and follow the latest upstream licensing statement before redistribution or derivative use.
 
@@ -116,7 +116,7 @@ Fastest ngrok startup path:
 npm run start:ngrok
 ```
 
-On first run, the terminal prompts for your ngrok authtoken, then optionally asks for a reserved domain and Basic Auth. The script updates `.env` to use `CC_WEB_ACCESS_MODE=ngrok`, keeps `CC_WEB_HOST=127.0.0.1`, enables `NGROK_AUTO_START=1`, and starts cc-web. Later runs reuse the saved `.env` values. To configure without starting:
+On first run, the terminal prompts for your ngrok authtoken, then optionally asks for a reserved domain and Basic Auth. The script updates `.env` to use `CC_WEB_ACCESS_MODE=ngrok`, keeps `CC_WEB_HOST=127.0.0.1`, enables `NGROK_AUTO_START=1`, and starts cc-web. Later runs reuse the saved `.env` values.
 
 Fully command-line setup also works without interactive prompts:
 
@@ -132,7 +132,7 @@ You can also pass the token through the environment:
 NGROK_AUTHTOKEN=YOUR_NGROK_AUTHTOKEN npm run start:ngrok
 ```
 
-To configure without starting:
+To write or update `.env` without starting the service:
 
 ```bash
 npm run setup:ngrok
@@ -181,6 +181,7 @@ See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design
 | `CC_WEB_DIRECT_SCOPE` | No | `local` | `direct` scope: `local` / `lan` |
 | `CC_WEB_PUBLIC_URL` | No | - | Public origin for public-host or reverse-proxy deployments; use `https://host[:port]` only |
 | `CC_WEB_TRUST_PROXY` | No | `0` | Set to `1` only when running behind a trusted reverse proxy |
+| `CC_WEB_KILL_PORT_OCCUPANT` | No | `0` | Set to `1` to allow startup to stop the process currently using the configured port; disabled by default |
 | `PORT` | No | - | Legacy alias; `CC_WEB_PORT` takes priority |
 | `HOST` | No | - | Legacy alias; `CC_WEB_HOST` takes priority |
 | `NGROK_AUTHTOKEN` | Required for `ngrok` | - | ngrok authtoken; keep it only in your local `.env` |
@@ -209,6 +210,9 @@ See [frp deployment](./docs/deploy-frp.md) for steps and [intranet access design
 | `FRP_VERSION` | Required for direct mirror downloads | - | frp version used for direct mirror asset naming |
 | `CLAUDE_PATH` | No | `claude` | Executable path to Claude CLI |
 | `CODEX_PATH` | No | `codex` | Executable path to Codex CLI |
+| `CC_WEB_CONFIG_DIR` | No | `./config` | Override config directory, mainly for isolated tests |
+| `CC_WEB_SESSIONS_DIR` | No | `./sessions` | Override sessions directory, mainly for isolated tests |
+| `CC_WEB_LOGS_DIR` | No | `./logs` | Override logs directory, mainly for isolated tests |
 | `PUSHPLUS_TOKEN` | No | - | PushPlus token (migrated into notification config on first start) |
 | `BARK_DEVICE_KEY` | No | - | Bark Device Key (migrated into notification config on first start) |
 | `BARK_SERVER_URL` | No | `https://api.day.app` | Bark server URL, including self-hosted servers |
