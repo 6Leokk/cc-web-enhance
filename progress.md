@@ -185,6 +185,15 @@
 - Updated README and README.en with terminal-only `--token`, `--domain`, `--basic-auth`, and `NGROK_AUTHTOKEN=... npm run start:ngrok` examples.
 - Re-ran `npm run regression:setup-ngrok`, `node --check scripts/setup-ngrok.js scripts/setup-ngrok-regression.js`, `git diff --check`, `npm run regression:ngrok-manager`, `npm run regression:access-config`, and full `npm run regression`; all passed.
 
+## 2026-05-24 README Rebuild and Mainland Bootstrap
+- User rejected incremental README edits and requested a full rewrite around the enhanced fork rather than the upstream README structure.
+- Rewrote `README.md` as a product entry page for `cc-web-enhance`: positioning, target users, mainland install path, install location, remote access choices, command reference, safety boundaries, docs navigation, and upstream/license note.
+- Rewrote `README.en.md` to match the new structure.
+- Added `scripts/install-cn.sh` as the copy-paste mainland bootstrap entrypoint. It defaults to `/opt/cc-web-enhance`, supports `CC_WEB_INSTALL_DIR`, `--start`, `--with-frp`, `--no-reset`, `--branch`, and delegates setup to `scripts/deploy/linux-cn.sh`.
+- Updated `deploy/frp/README.md`, `frp/README.md`, and `scripts/frp/README.md` as concise current-project guidance.
+- Added deploy regression checks for the installer, install directory documentation, and correct environment override piping.
+- Ran `npm run regression:deploy`, shell syntax checks, `scripts/install-cn.sh --help`, `git diff --check`, and full `npm run regression`; all passed.
+
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|

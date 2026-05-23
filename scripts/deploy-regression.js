@@ -174,9 +174,32 @@ function checkWrappersAndDocs() {
   assertIncludes(readme, '--reset', 'README should document clean rebuild deployment');
 }
 
+function checkMainlandBootstrapInstaller() {
+  const installer = read('scripts/install-cn.sh');
+
+  assertIncludes(installer, 'set -euo pipefail', 'installer should use strict shell mode');
+  assertIncludes(installer, 'DEFAULT_INSTALL_DIR="/opt/cc-web-enhance"', 'installer should have a stable default install directory');
+  assertIncludes(installer, 'https://github.com/6Leokk/cc-web-enhance.git', 'installer should clone the enhanced repository');
+  assertIncludes(installer, 'DEFAULT_BRANCH="main"', 'installer should install the GitHub default branch by default');
+  assertIncludes(installer, 'pull --ff-only', 'installer should update existing checkouts without rewriting local changes');
+  assertIncludes(installer, 'checkout --track "origin/$BRANCH"', 'installer should create a missing local branch from origin');
+  assertIncludes(installer, 'scripts/deploy/linux-cn.sh', 'installer should delegate dependency setup to the cn deploy wrapper');
+  assertIncludes(installer, '--start', 'installer should expose a start option');
+  assertIncludes(installer, '--with-frp', 'installer should expose a frp option');
+  assertIncludes(installer, '--no-reset', 'installer should expose a no-reset option');
+  assertNotIncludes(installer, 'npm config set', 'installer must not mutate host npm configuration');
+  assertNotIncludes(installer, 'apt install', 'installer should not install system packages implicitly');
+
+  const readme = read('README.md');
+  assertIncludes(readme, 'scripts/install-cn.sh', 'README should document the copy-paste mainland installer');
+  assertIncludes(readme, '/opt/cc-web-enhance', 'README should document where the installer puts the app');
+  assertIncludes(readme, '| CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start', 'README should pass install directory override to bash, not curl');
+}
+
 checkDeployPlanner();
 checkFrpDownloadHelpers();
 checkResetRunRemovesArtifacts();
 checkWrappersAndDocs();
+checkMainlandBootstrapInstaller();
 
 console.log('deploy regression checks passed');
