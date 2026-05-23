@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 const { WebSocketServer } = require('ws');
+const { resolveAccessConfig } = require('./lib/access-config');
+const {
+  isAccessIdentityWhitelisted,
+  resolveAuthClientIdentity,
+} = require('./lib/access-auth-ip');
 const { resolveServerBindConfig } = require('./lib/server-config');
 const { startFrpFromEnv, stopFrpHandle } = require('./lib/frp-manager');
 const { createAgentRuntime } = require('./lib/agent-runtime');
@@ -33,9 +38,21 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+const CONFIG_DIR = process.env.CC_WEB_CONFIG_DIR || path.join(__dirname, 'config');
+let ACCESS_CONFIG;
+try {
+  ACCESS_CONFIG = resolveAccessConfig(process.env, { configDir: CONFIG_DIR });
+} catch (err) {
+  console.error(`CC-Web access configuration error: ${err.message}`);
+  process.exit(98);
+}
+
 let serverBindConfig;
 try {
-  serverBindConfig = resolveServerBindConfig(process.env);
+  serverBindConfig = resolveServerBindConfig(process.env, {
+    accessConfig: ACCESS_CONFIG,
+    networkInterfaces: os.networkInterfaces(),
+  });
 } catch (err) {
   console.error(`CC-Web server configuration error: ${err.message}`);
   process.exit(97);
@@ -44,7 +61,6 @@ const PORT = serverBindConfig.port;
 const HOST = serverBindConfig.host;
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
 const CODEX_PATH = process.env.CODEX_PATH || 'codex';
-const CONFIG_DIR = process.env.CC_WEB_CONFIG_DIR || path.join(__dirname, 'config');
 const SESSIONS_DIR = process.env.CC_WEB_SESSIONS_DIR || path.join(__dirname, 'sessions');
 const PUBLIC_DIR = process.env.CC_WEB_PUBLIC_DIR || path.join(__dirname, 'public');
 const LOGS_DIR = process.env.CC_WEB_LOGS_DIR || path.join(__dirname, 'logs');
@@ -60,7 +76,7 @@ const MODEL_CONFIG_PATH = path.join(CONFIG_DIR, 'model.json');
 const CODEX_CONFIG_PATH = path.join(CONFIG_DIR, 'codex.json');
 const UI_CONFIG_PATH = path.join(CONFIG_DIR, 'ui.json');
 const BANNED_IPS_PATH = path.join(CONFIG_DIR, 'banned_ips.json');
-const TRUST_PROXY = process.env.CC_WEB_TRUST_PROXY === '1';
+const TRUST_PROXY = ACCESS_CONFIG.trustProxy;
 const ALLOW_PORT_KILL = process.env.CC_WEB_KILL_PORT_OCCUPANT === '1';
 
 fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -558,9 +574,10 @@ const BAN_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 const authFailures = new Map(); // ip -> [timestamp, ...]
 let bannedIPs = new Map(); // ip -> expireTimestamp
 
-// Tailscale / loopback whitelist — never ban these IPs.
 // Extra whitelist can be provided via env var (comma/space separated):
 //   CC_WEB_IP_WHITELIST="<ip1>,<ip2>"
+// Automatic loopback / Tailscale whitelist rules are applied by access-auth-ip
+// only when the resolved identity is eligible for those local-source rules.
 const EXTRA_WHITELIST_IPS = new Set(
   String(process.env.CC_WEB_IP_WHITELIST || '')
     .split(/[\s,]+/)
@@ -569,30 +586,13 @@ const EXTRA_WHITELIST_IPS = new Set(
     .map(s => s.replace(/^::ffff:/, ''))
 );
 
-function isWhitelistedIP(ip) {
-  if (!ip) return false;
-  const cleaned = ip.replace(/^::ffff:/, '');
-  return cleaned === '127.0.0.1'
-    || cleaned === '::1'
-    || cleaned.startsWith('100.')
-    || EXTRA_WHITELIST_IPS.has(cleaned);
-}
-
-function normalizeClientIP(ip) {
-  const cleaned = String(ip || '').trim().replace(/^::ffff:/, '');
-  return cleaned || null;
-}
-
-function getClientIP(req) {
-  const remoteAddress = normalizeClientIP(req?.socket?.remoteAddress || null);
-  if (!TRUST_PROXY) return remoteAddress;
-  const forwardedHeader = Array.isArray(req?.headers?.['x-forwarded-for'])
-    ? req.headers['x-forwarded-for'][0]
-    : req?.headers?.['x-forwarded-for'];
-  const forwardedFirst = typeof forwardedHeader === 'string'
-    ? normalizeClientIP(forwardedHeader.split(',')[0])
-    : null;
-  return forwardedFirst || remoteAddress;
+function getAuthIdentity(req) {
+  return resolveAuthClientIdentity(req, {
+    accessMode: ACCESS_CONFIG.mode,
+    directScope: ACCESS_CONFIG.directScope,
+    provider: ACCESS_CONFIG.mode,
+    trustProxy: TRUST_PROXY,
+  });
 }
 
 function loadBannedIPs() {
@@ -625,18 +625,23 @@ function isBanned(ip) {
   return true;
 }
 
-function recordAuthFailure(ip) {
-  if (!ip || isWhitelistedIP(ip)) return false;
+function recordAuthFailure(identity) {
+  const resolvedIdentity = typeof identity === 'string'
+    ? { identity, kind: 'ip', source: 'socket', whitelistEligible: true }
+    : identity;
+  const identityKey = resolvedIdentity?.identity;
+  if (!identityKey) return false;
+  if (isAccessIdentityWhitelisted(resolvedIdentity, { ipWhitelist: EXTRA_WHITELIST_IPS })) return false;
   const now = Date.now();
-  let list = authFailures.get(ip) || [];
+  let list = authFailures.get(identityKey) || [];
   list.push(now);
   list = list.filter(t => now - t < AUTH_FAIL_WINDOW);
-  authFailures.set(ip, list);
+  authFailures.set(identityKey, list);
   if (list.length >= AUTH_FAIL_MAX) {
-    bannedIPs.set(ip, Date.now() + BAN_DURATION);
+    bannedIPs.set(identityKey, Date.now() + BAN_DURATION);
     saveBannedIPs();
-    authFailures.delete(ip);
-    plog('WARN', 'ip_banned', { ip, reason: `${AUTH_FAIL_MAX} failed auth in ${AUTH_FAIL_WINDOW / 1000}s` });
+    authFailures.delete(identityKey);
+    plog('WARN', 'ip_banned', { ip: identityKey, reason: `${AUTH_FAIL_MAX} failed auth in ${AUTH_FAIL_WINDOW / 1000}s` });
     return true;
   }
   return false;
@@ -2385,11 +2390,11 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-  const clientIP = getClientIP(req);
+  const authIdentity = getAuthIdentity(req);
 
   // Check if IP is banned
-  if (clientIP && isBanned(clientIP)) {
-    plog('WARN', 'banned_ip_rejected', { ip: clientIP });
+  if (authIdentity.identity && isBanned(authIdentity.identity)) {
+    plog('WARN', 'banned_ip_rejected', { ip: authIdentity.identity });
     wsSend(ws, { type: 'auth_result', success: false, banned: true });
     ws.close();
     return;
@@ -2412,7 +2417,7 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'auth') {
       ensureAuthLoaded();
       // Check ban before processing auth
-      if (clientIP && isBanned(clientIP)) {
+      if (authIdentity.identity && isBanned(authIdentity.identity)) {
         wsSend(ws, { type: 'auth_result', success: false, banned: true });
         ws.close();
         return;
@@ -2426,7 +2431,7 @@ wss.on('connection', (ws, req) => {
         wsSend(ws, { type: 'ui_config', config: loadUiConfig() });
         sendSessionList(ws);
       } else {
-        const justBanned = recordAuthFailure(clientIP);
+        const justBanned = recordAuthFailure(authIdentity);
         wsSend(ws, { type: 'auth_result', success: false, banned: justBanned });
         if (justBanned) ws.close();
       }

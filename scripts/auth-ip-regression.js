@@ -11,28 +11,43 @@ function assert(condition, message) {
 }
 
 assert(
-  /const\s+TRUST_PROXY\s*=\s*process\.env\.CC_WEB_TRUST_PROXY\s*===\s*['"]1['"]/.test(serverJs),
-  'server should gate forwarded-IP trust behind CC_WEB_TRUST_PROXY=1',
+  /resolveAccessConfig\(process\.env,\s*\{\s*configDir:\s*CONFIG_DIR\s*\}\)/.test(serverJs),
+  'server should resolve access config before choosing auth identity policy',
 );
 
 assert(
-  /function\s+getClientIP\s*\(req\)/.test(serverJs),
-  'server should resolve client IP through a dedicated helper',
+  /const\s+TRUST_PROXY\s*=\s*ACCESS_CONFIG\.trustProxy/.test(serverJs),
+  'server should use normalized access trustProxy config',
 );
 
 assert(
-  /if\s*\(!TRUST_PROXY\)\s*return\s+remoteAddress;/.test(serverJs),
-  'default client IP resolution should ignore X-Forwarded-For and use the socket remote address',
+  /resolveAuthClientIdentity\(req,\s*\{/.test(serverJs),
+  'WebSocket auth path should resolve mode-aware auth identity through access-auth-ip helper',
 );
 
 assert(
-  /const\s+clientIP\s*=\s*getClientIP\(req\)/.test(serverJs),
-  'WebSocket auth and ban flow should use the centralized client-IP helper',
+  /isAccessIdentityWhitelisted\(resolvedIdentity,\s*\{\s*ipWhitelist:\s*EXTRA_WHITELIST_IPS\s*\}\)/.test(serverJs),
+  'auth failure path should use access identity whitelist policy',
 );
 
 assert(
-  !/const\s+forwarded\s*=\s*req\.headers\['x-forwarded-for'\]/.test(serverJs),
-  'WebSocket auth path should not read X-Forwarded-For directly anymore',
+  /recordAuthFailure\(authIdentity\)/.test(serverJs),
+  'WebSocket auth failure path should record failures against the resolved identity object',
+);
+
+assert(
+  /isBanned\(authIdentity\.identity\)/.test(serverJs),
+  'WebSocket ban checks should use the resolved auth identity string',
+);
+
+assert(
+  !/function\s+getClientIP\s*\(req\)/.test(serverJs),
+  'server should not keep the old raw getClientIP helper after access-auth-ip integration',
+);
+
+assert(
+  !/function\s+isWhitelistedIP\s*\(ip\)/.test(serverJs),
+  'server should not keep the old string-only whitelist helper after access-auth-ip integration',
 );
 
 console.log('auth IP regression checks passed');
