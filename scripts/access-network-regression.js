@@ -63,6 +63,11 @@ function checkUrlRendering() {
     'wildcard bind should render loopback as local URL',
   );
   assert.deepStrictEqual(
+    buildLocalUrls('::', 8083),
+    ['http://127.0.0.1:8083'],
+    'IPv6 wildcard bind should render loopback as local URL',
+  );
+  assert.deepStrictEqual(
     buildLanUrls(8083, fakeInterfaces()),
     ['http://192.168.1.23:8083', 'http://10.0.0.7:8083', 'http://172.20.10.5:8083'],
     'LAN URLs should use concrete private addresses',
