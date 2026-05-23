@@ -10,6 +10,7 @@
     "regression:codex-format": "node scripts/codex-message-format-regression.js",
     "regression:notify": "node scripts/notify-regression.js",
     "regression:notify-foreground": "node scripts/notify-foreground-regression.js",
+    "regression:access-config": "node scripts/access-config-regression.js",
     "regression:foreground-refresh": "node scripts/foreground-session-refresh-regression.js",
     "regression:foreground-restore": "node scripts/foreground-restore-regression.js",
     "regression:codex-stream-refresh": "node scripts/codex-stream-refresh-regression.js",
