@@ -79,26 +79,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create
 
 只从你信任的仓库执行远程 PowerShell 脚本。想先检查内容，可以打开 `scripts/install-cn.ps1` 看完再运行。
 
-### MindFS 国内 Windows 一键安装
-
-如果你在中国内网，MindFS 官方 Windows 安装脚本常会卡在 GitHub Release 下载。可以直接用本仓库提供的国内脚本，它会自动切换多个 GitHub 代理，必要时再回退到直连。
-
-```powershell
-irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex
-```
-
-自定义代理入口：
-
-```powershell
-$env:MINDFS_GITHUB_PROXY_BASE='https://gh-proxy.com;https://v6.gh-proxy.org'
-```
-
-默认安装位置：
-
-```text
-$env:LOCALAPPDATA\Programs\mindfs
-```
-
 ## Windows 已 clone 仓库
 
 如果你已经把仓库 clone 到 Windows，本机启动最直接：

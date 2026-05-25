@@ -79,26 +79,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create
 
 Only run remote PowerShell scripts from repositories you trust. If you want to inspect it first, read `scripts/install-cn.ps1` before running it.
 
-### MindFS Mainland Windows One-Command Install
-
-If you are on a mainland China network, the official MindFS Windows installer can fail while downloading the GitHub Release asset. Use this repository's mainland installer instead; it retries through multiple GitHub proxy endpoints before falling back to the direct URL.
-
-```powershell
-irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex
-```
-
-Custom proxy endpoints:
-
-```powershell
-$env:MINDFS_GITHUB_PROXY_BASE='https://gh-proxy.com;https://v6.gh-proxy.org'
-```
-
-Default install prefix:
-
-```text
-$env:LOCALAPPDATA\Programs\mindfs
-```
-
 ## Windows With An Existing Clone
 
 If you have already cloned the repository on Windows, run the repository-local wrapper:

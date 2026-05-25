@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js && node scripts/auth-ip-regression.js && node scripts/access-config-regression.js && node scripts/access-network-regression.js && node scripts/access-auth-ip-regression.js && node scripts/access-manager-regression.js && node scripts/quick-login-regression.js && node scripts/access-http-ws-regression.js && node scripts/intranet-frp-safety-regression.js && node scripts/frp-builtin-regression.js && node scripts/ngrok-manager-regression.js && node scripts/deploy-regression.js && node scripts/mindfs-install-cn-regression.js && node scripts/setup-ngrok-regression.js",
+    "regression": "node scripts/regression.js && node scripts/foreground-session-refresh-regression.js && node scripts/foreground-restore-regression.js && node scripts/session-navigation-state-regression.js && node scripts/lazy-history-regression.js && node scripts/mobile-scroll-regression.js && node scripts/static-delivery-regression.js && node scripts/static-delivery-cache-regression.js && node scripts/codex-rollout-cache-regression.js && node scripts/context-telemetry-regression.js && node scripts/spawn-error-regression.js && node scripts/auth-ip-regression.js && node scripts/access-config-regression.js && node scripts/access-network-regression.js && node scripts/access-auth-ip-regression.js && node scripts/access-manager-regression.js && node scripts/quick-login-regression.js && node scripts/access-http-ws-regression.js && node scripts/intranet-frp-safety-regression.js && node scripts/frp-builtin-regression.js && node scripts/ngrok-manager-regression.js && node scripts/deploy-regression.js && node scripts/setup-ngrok-regression.js",
     "regression:assistant-mode": "node scripts/assistant-message-mode-regression.js",
     "regression:auth-ip": "node scripts/auth-ip-regression.js",
     "regression:codex-format": "node scripts/codex-message-format-regression.js",
@@ -39,7 +39,6 @@
     "regression:frp-builtin": "node scripts/frp-builtin-regression.js",
     "regression:ngrok-manager": "node scripts/ngrok-manager-regression.js",
     "regression:deploy": "node scripts/deploy-regression.js",
-    "regression:mindfs-install-cn": "node scripts/mindfs-install-cn-regression.js",
     "regression:setup-ngrok": "node scripts/setup-ngrok-regression.js",
     "deploy:global": "node scripts/deploy.js --profile global --reset",
     "deploy:cn": "node scripts/deploy.js --profile cn --reset",
