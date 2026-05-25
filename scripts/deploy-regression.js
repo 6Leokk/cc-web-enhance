@@ -196,10 +196,35 @@ function checkMainlandBootstrapInstaller() {
   assertIncludes(readme, '| CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start', 'README should pass install directory override to bash, not curl');
 }
 
+function checkWindowsBootstrapInstaller() {
+  const installer = read('scripts/install-cn.ps1');
+
+  assertIncludes(installer, '$ErrorActionPreference = \'Stop\'', 'windows installer should stop on errors');
+  assertIncludes(installer, '$DefaultInstallDir = Join-Path $env:LOCALAPPDATA \'cc-web-enhance\'', 'windows installer should default to a per-user writable install directory');
+  assertIncludes(installer, 'https://github.com/6Leokk/cc-web-enhance.git', 'windows installer should clone the enhanced repository');
+  assertIncludes(installer, '$DefaultBranch = \'main\'', 'windows installer should install the GitHub default branch by default');
+  assertIncludes(installer, 'pull --ff-only', 'windows installer should update existing checkouts without rewriting local changes');
+  assertIncludes(installer, 'checkout --track "origin/$Branch"', 'windows installer should create a missing local branch from origin');
+  assertIncludes(installer, 'scripts\\deploy\\windows-cn.cmd', 'windows installer should delegate dependency setup to the cn Windows deploy wrapper');
+  assertIncludes(installer, '-Start', 'windows installer should expose a start option');
+  assertIncludes(installer, '-WithFrp', 'windows installer should expose a frp option');
+  assertIncludes(installer, '-NoReset', 'windows installer should expose a no-reset option');
+  assertIncludes(installer, "$nodeVersion = & node -p 'process.versions.node'", 'windows installer should read the Node version string without nested quoting');
+  assertIncludes(installer, "[int](($nodeVersion -split '\\.')[0])", 'windows installer should parse the version in PowerShell');
+  assertNotIncludes(installer, 'split(".")', 'windows installer should not pass a quoted dot through node -p');
+  assertNotIncludes(installer, 'npm config set', 'windows installer must not mutate host npm configuration');
+
+  const readme = read('README.md');
+  assertIncludes(readme, 'scripts/install-cn.ps1', 'README should document the copy-paste Windows installer');
+  assertIncludes(readme, '$env:LOCALAPPDATA\\cc-web-enhance', 'README should document where the Windows installer puts the app');
+  assertIncludes(readme, '-InstallDir D:\\cc-web-enhance -Start', 'README should document Windows install directory override');
+}
+
 checkDeployPlanner();
 checkFrpDownloadHelpers();
 checkResetRunRemovesArtifacts();
 checkWrappersAndDocs();
 checkMainlandBootstrapInstaller();
+checkWindowsBootstrapInstaller();
 
 console.log('deploy regression checks passed');

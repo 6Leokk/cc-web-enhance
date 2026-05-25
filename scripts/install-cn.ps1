@@ -69,13 +69,13 @@ function Require-Command {
 }
 
 function Require-NodeVersion {
-  $major = & node -p 'Number(process.versions.node.split(".")[0])'
+  $nodeVersion = & node -p 'process.versions.node'
   if ($LASTEXITCODE -ne 0) {
     throw 'Failed to detect Node.js version.'
   }
+  $major = [int](($nodeVersion -split '\.')[0])
   if ([int]$major -lt 18) {
-    $version = & node -v
-    throw "Node.js >= 18 is required. Current version: $version"
+    throw "Node.js >= 18 is required. Current version: $nodeVersion"
   }
 }
 
