@@ -110,11 +110,11 @@ function Invoke-GitWithFallback {
   )
 
   Write-Info "$Description (via proxy)..."
-  $ok = Try-Git @ProxyArgs
+  $ok = Try-Git -Arguments $ProxyArgs
   if ($ok) { return }
 
   Write-Info "Proxy failed, retrying $Description direct..."
-  $ok = Try-Git @DirectArgs
+  $ok = Try-Git -Arguments $DirectArgs
   if (-not $ok) {
     throw "$Description failed both via proxy and direct. Check your network."
   }
