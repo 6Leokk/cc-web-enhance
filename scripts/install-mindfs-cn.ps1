@@ -3,7 +3,7 @@
 # proxy fallbacks, then installs with the same layout as the upstream script.
 #
 # Usage:
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex"
+#   irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex
 #
 [CmdletBinding()]
 param(

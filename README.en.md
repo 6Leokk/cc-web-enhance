@@ -84,7 +84,7 @@ Only run remote PowerShell scripts from repositories you trust. If you want to i
 If you are on a mainland China network, the official MindFS Windows installer can fail while downloading the GitHub Release asset. Use this repository's mainland installer instead; it retries through multiple GitHub proxy endpoints before falling back to the direct URL.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1')))"
+irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex
 ```
 
 Custom proxy endpoints:

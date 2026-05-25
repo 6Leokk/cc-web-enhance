@@ -84,7 +84,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create
 如果你在中国内网，MindFS 官方 Windows 安装脚本常会卡在 GitHub Release 下载。可以直接用本仓库提供的国内脚本，它会自动切换多个 GitHub 代理，必要时再回退到直连。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1')))"
+irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex
 ```
 
 自定义代理入口：

@@ -14,6 +14,18 @@ function assertIncludes(haystack, needle, message) {
   assert(String(haystack).includes(needle), `${message}: missing ${needle}`);
 }
 
+function assertNotIncludes(haystack, needle, message) {
+  assert(!String(haystack).includes(needle), `${message}: found ${needle}`);
+}
+
+function extractSection(text, startMarker, endMarker) {
+  const start = text.indexOf(startMarker);
+  assert(start >= 0, `missing section start: ${startMarker}`);
+  const end = text.indexOf(endMarker, start + startMarker.length);
+  assert(end >= 0, `missing section end: ${endMarker}`);
+  return text.slice(start, end);
+}
+
 assert(fs.existsSync(installerPath), 'mindfs mainland Windows installer should exist');
 
 const installer = fs.readFileSync(installerPath, 'utf8');
@@ -36,13 +48,26 @@ assertIncludes(installer, 'agents.json', 'installer should preserve upstream age
 assertIncludes(installer, 'share\\mindfs\\web', 'installer should preserve upstream web asset installation');
 assertIncludes(installer, 'Broadcast-EnvironmentChange', 'installer should refresh Windows environment settings');
 
-assertIncludes(readme, 'MindFS 国内 Windows 一键安装', 'Chinese README should document the MindFS mainland installer');
-assertIncludes(readme, 'scripts/install-mindfs-cn.ps1', 'Chinese README should point to the MindFS installer script');
-assertIncludes(readme, 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1', 'Chinese README should use a raw proxy for the copy-paste command');
-assertIncludes(readme, 'MINDFS_GITHUB_PROXY_BASE', 'Chinese README should document custom proxy override');
-assertIncludes(readme, '$env:LOCALAPPDATA\\Programs\\mindfs', 'Chinese README should document the MindFS install prefix');
+const readmeMindfsSection = extractSection(
+  readme,
+  '### MindFS 国内 Windows 一键安装',
+  '## Windows 已 clone 仓库',
+);
+assertIncludes(readmeMindfsSection, 'MindFS 国内 Windows 一键安装', 'Chinese README should document the MindFS mainland installer');
+assertIncludes(readmeMindfsSection, 'scripts/install-mindfs-cn.ps1', 'Chinese README should point to the MindFS installer script');
+assertIncludes(readmeMindfsSection, 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1', 'Chinese README should use a raw proxy for the copy-paste command');
+assertIncludes(readmeMindfsSection, 'irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex', 'Chinese README should use a short complete copy-paste command');
+assertNotIncludes(readmeMindfsSection, 'scriptblock]::Create((irm', 'Chinese README should avoid the long scriptblock command for MindFS');
+assertIncludes(readmeMindfsSection, 'MINDFS_GITHUB_PROXY_BASE', 'Chinese README should document custom proxy override');
+assertIncludes(readmeMindfsSection, '$env:LOCALAPPDATA\\Programs\\mindfs', 'Chinese README should document the MindFS install prefix');
 
-assertIncludes(englishReadme, 'MindFS Mainland Windows One-Command Install', 'English README should document the MindFS mainland installer');
-assertIncludes(englishReadme, 'scripts/install-mindfs-cn.ps1', 'English README should point to the MindFS installer script');
+const englishMindfsSection = extractSection(
+  englishReadme,
+  '### MindFS Mainland Windows One-Command Install',
+  '## Windows With An Existing Clone',
+);
+assertIncludes(englishMindfsSection, 'MindFS Mainland Windows One-Command Install', 'English README should document the MindFS mainland installer');
+assertIncludes(englishMindfsSection, 'scripts/install-mindfs-cn.ps1', 'English README should point to the MindFS installer script');
+assertIncludes(englishMindfsSection, 'irm https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1 | iex', 'English README should use a short complete copy-paste command');
 
 console.log('mindfs mainland installer regression checks passed');
