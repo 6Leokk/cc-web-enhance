@@ -12,6 +12,7 @@ Set-StrictMode -Version 2.0
 
 $DefaultRepoUrl = 'https://github.com/6Leokk/cc-web-enhance.git'
 $DefaultBranch = 'main'
+$GitHubProxyBase = 'https://gh-proxy.com/'
 
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
   $DefaultInstallDir = Join-Path (Get-Location).Path 'cc-web-enhance'
@@ -32,6 +33,14 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 function Write-Info {
   param([string]$Message)
   Write-Host "[install-cn] $Message"
+}
+
+function Proxy-GitUrl {
+  param([string]$Url)
+  if ($Url.StartsWith('https://github.com/')) {
+    return $GitHubProxyBase + $Url
+  }
+  return $Url
 }
 
 function Invoke-Checked {
@@ -88,9 +97,12 @@ function Ensure-InstallParent {
 }
 
 function Install-OrUpdateRepo {
+  $proxyRepo = Proxy-GitUrl $Repo
+
   if (-not (Test-Path -LiteralPath $InstallDir)) {
     Write-Info "Cloning $Repo#$Branch into $InstallDir"
-    Invoke-Checked -FilePath 'git' -Arguments @('clone', '--branch', $Branch, $Repo, $InstallDir)
+    Invoke-Checked -FilePath 'git' -Arguments @('clone', '--branch', $Branch, $proxyRepo, $InstallDir)
+    Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'remote', 'set-url', 'origin', $Repo)
     return
   }
 
@@ -100,19 +112,18 @@ function Install-OrUpdateRepo {
 
   Write-Info "Updating existing checkout in $InstallDir"
   Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'remote', 'set-url', 'origin', $Repo)
-  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'fetch', 'origin', $Branch)
+  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, '-c', "url.$GitHubProxyBase.insteadOf=https://github.com/", 'fetch', 'origin', $Branch)
 
   & git -C $InstallDir show-ref --verify --quiet "refs/heads/$Branch"
   $branchExists = $LASTEXITCODE -eq 0
   if ($branchExists) {
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', $Branch)
   } else {
-    # Equivalent guarded command: checkout --track "origin/$Branch"
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', '--track', "origin/$Branch")
   }
 
   Write-Info 'Updating existing checkout with pull --ff-only'
-  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'pull', '--ff-only', 'origin', $Branch)
+  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, '-c', "url.$GitHubProxyBase.insteadOf=https://github.com/", 'pull', '--ff-only', 'origin', $Branch)
 }
 
 function Prepare-EnvFile {
