@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const { spawnSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -30,6 +31,7 @@ function parseArgs(argv) {
     start: false,
     skipInstall: false,
     reset: false,
+    nonInteractive: false,
     npmRegistry: '',
     githubProxyBase: '',
     frpDownloadBaseUrl: '',
@@ -55,6 +57,7 @@ function parseArgs(argv) {
     else if (item === '--skip-install') options.skipInstall = true;
     else if (item === '--reset') options.reset = true;
     else if (item === '--no-reset') options.reset = false;
+    else if (item === '--non-interactive') options.nonInteractive = true;
     else if (item === '--npm-registry') options.npmRegistry = takeValue();
     else if (item.startsWith('--npm-registry=')) options.npmRegistry = item.slice('--npm-registry='.length);
     else if (item === '--github-proxy-base') options.githubProxyBase = takeValue();
@@ -262,9 +265,28 @@ function runRemovePath(step, options = {}) {
   console.log(`[deploy] Reset ${step.target}`);
 }
 
-function runDeploy(options = {}) {
+async function runDeploy(options = {}) {
   const cwd = options.cwd || REPO_ROOT;
   const envPath = path.join(cwd, '.env');
+  const envExists = fs.existsSync(envPath);
+
+  if (!envExists && !options.nonInteractive && process.stdin.isTTY) {
+    try {
+      const wizardEnv = await runSetupWizard(options);
+      if (wizardEnv) {
+        const sourcePath = path.join(cwd, '.env.example');
+        if (fs.existsSync(sourcePath)) {
+          fs.copyFileSync(sourcePath, envPath);
+        }
+        writeEnvFile(envPath, wizardEnv);
+      }
+    } catch (err) {
+      console.error(`\n[deploy] Setup wizard failed: ${err.message}`);
+      console.error('[deploy] Run deploy.js again or edit .env manually.\n');
+      process.exit(1);
+    }
+  }
+
   const fileEnv = readEnvFile(envPath);
   const mergedEnv = { ...process.env, ...fileEnv };
   const withFrp = options.withFrp === null || options.withFrp === undefined
@@ -288,6 +310,135 @@ function runDeploy(options = {}) {
   return plan;
 }
 
+function question(rl, promptText) {
+  return new Promise((resolve) => {
+    rl.question(promptText, (answer) => resolve(String(answer || '').trim()));
+  });
+}
+
+function hiddenQuestion(promptText) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true,
+    });
+    const originalWrite = rl._writeToOutput;
+    rl._writeToOutput = function writeHidden(text) {
+      if (String(text).includes(promptText)) {
+        originalWrite.call(rl, text);
+      } else {
+        originalWrite.call(rl, '*');
+      }
+    };
+    rl.question(promptText, (answer) => {
+      rl.close();
+      process.stdout.write('\n');
+      resolve(String(answer || '').trim());
+    });
+  });
+}
+
+async function runSetupWizard(options = {}) {
+  const env = {};
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  try {
+    console.log('\n[deploy] === cc-web interactive setup ===\n');
+
+    const proceed = await question(rl, 'Configure cc-web now? [Y/n]: ');
+    if (proceed && proceed.toLowerCase() !== 'y' && proceed.toLowerCase() !== 'yes') {
+      console.log('[deploy] Skipping setup wizard. Using .env.example defaults.\n');
+      return null;
+    }
+
+    // Access mode
+    console.log('\nAccess modes:');
+    console.log('  1. direct  — local browser only (default)');
+    console.log('  2. ngrok   — public access via ngrok tunnel (best for mainland China)');
+    console.log('  3. frp     — self-hosted frp tunnel');
+    console.log('  4. public  — behind a reverse proxy with a known public URL');
+    const modeChoice = await question(rl, '\nSelect access mode [1/2/3/4] (default: 1): ');
+
+    if (modeChoice === '2') {
+      env.CC_WEB_ACCESS_MODE = 'ngrok';
+      console.log('\n--- ngrok configuration ---');
+      console.log('Get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken');
+      const token = await hiddenQuestion('ngrok authtoken (required): ');
+      if (!token) throw new Error('ngrok authtoken is required for ngrok mode');
+      env.NGROK_AUTHTOKEN = token;
+      const domain = await question(rl, 'ngrok domain (optional, press Enter to skip): ');
+      if (domain) env.NGROK_DOMAIN = domain;
+      const basicAuth = await question(rl, 'ngrok basic auth user:pass (optional, press Enter to skip): ');
+      if (basicAuth) env.NGROK_BASIC_AUTH = basicAuth;
+      env.NGROK_AUTO_START = '1';
+    } else if (modeChoice === '3') {
+      env.CC_WEB_ACCESS_MODE = 'frp';
+      console.log('\n--- frp configuration ---');
+      const serverAddr = await question(rl, 'FRP server address (required): ');
+      if (!serverAddr) throw new Error('FRP server address is required for frp mode');
+      env.FRP_MODE = 'client';
+      env.FRP_SERVER_ADDR = serverAddr;
+      const serverPort = await question(rl, 'FRP server port [7000]: ');
+      env.FRP_SERVER_PORT = serverPort || '7000';
+      const token = await hiddenQuestion('FRP token (required): ');
+      if (!token) throw new Error('FRP token is required for frp mode');
+      env.FRP_TOKEN = token;
+      const publicPort = await question(rl, 'FRP public port (optional): ');
+      if (publicPort) env.FRP_PUBLIC_PORT = publicPort;
+      const domain = await question(rl, 'FRP custom domain (optional, press Enter to skip): ');
+      if (domain) env.FRP_CUSTOM_DOMAIN = domain;
+      env.FRP_LOCAL_IP = '127.0.0.1';
+      env.FRP_LOCAL_PORT = '8083';
+      env.FRP_AUTO_START = '1';
+    } else if (modeChoice === '4') {
+      env.CC_WEB_ACCESS_MODE = 'public';
+      console.log('\n--- public mode ---');
+      const publicUrl = await question(rl, 'Public URL (required, e.g. https://cc.example.com): ');
+      if (!publicUrl) throw new Error('Public URL is required for public mode');
+      env.CC_WEB_PUBLIC_URL = publicUrl;
+    } else {
+      env.CC_WEB_ACCESS_MODE = 'direct';
+      console.log('\n--- direct mode ---');
+      const scope = await question(rl, 'Scope: local (this machine only) or lan (local network)? [local/lan] (default: local): ');
+      env.CC_WEB_DIRECT_SCOPE = (scope && scope.toLowerCase() === 'lan') ? 'lan' : 'local';
+    }
+
+    // Password
+    const password = await question(rl, '\nWeb login password (leave empty for random): ');
+    if (password) env.CC_WEB_PASSWORD = password;
+
+    // Port
+    const port = await question(rl, 'Listen port [8083]: ');
+    if (port) env.CC_WEB_PORT = port;
+
+    console.log('\n[deploy] Configuration complete.\n');
+    return env;
+  } finally {
+    rl.close();
+  }
+}
+
+function writeEnvFile(filePath, values) {
+  const envPath = path.resolve(filePath);
+  let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined || value === null) continue;
+    const pattern = new RegExp(`^#?\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=.*`, 'm');
+    const replacement = `${key}=${value}`;
+    if (pattern.test(content)) {
+      content = content.replace(pattern, replacement);
+    } else {
+      if (content && !content.endsWith('\n')) content += '\n';
+      content += `${replacement}\n`;
+    }
+  }
+
+  fs.writeFileSync(envPath, content, 'utf8');
+  console.log(`[deploy] Wrote configuration to ${envPath}`);
+}
+
 function printHelp() {
   console.log(`Usage: node scripts/deploy.js --profile <global|cn> [options]
 
@@ -298,6 +449,7 @@ Options:
   --skip-install                Skip npm install
   --reset                       Remove node_modules, frp/bin, and frp/tmp before setup
   --no-reset                    Keep existing install artifacts when calling deploy.js directly
+  --non-interactive             Skip interactive setup wizard (for CI/automation)
   --npm-registry <url>          Override per-command npm registry
   --github-proxy-base <url>     Prefix GitHub release asset downloads
   --frp-download-base-url <url> Use <base>/v<version>/<asset> for frp downloads
@@ -307,22 +459,20 @@ Options:
 `);
 }
 
-function main() {
+async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     printHelp();
     return;
   }
-  runDeploy(options);
+  await runDeploy(options);
 }
 
 if (require.main === module) {
-  try {
-    main();
-  } catch (err) {
+  main().catch((err) => {
     console.error(`[deploy] ${err.stack || err.message}`);
     process.exit(1);
-  }
+  });
 }
 
 module.exports = {

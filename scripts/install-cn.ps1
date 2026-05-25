@@ -119,6 +119,7 @@ function Install-OrUpdateRepo {
   if ($branchExists) {
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', $Branch)
   } else {
+    # Equivalent guarded command: checkout --track "origin/$Branch"
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', '--track', "origin/$Branch")
   }
 
