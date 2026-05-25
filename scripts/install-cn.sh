@@ -4,6 +4,7 @@ set -euo pipefail
 DEFAULT_REPO_URL="https://github.com/6Leokk/cc-web-enhance.git"
 DEFAULT_BRANCH="main"
 DEFAULT_INSTALL_DIR="/opt/cc-web-enhance"
+GITHUB_PROXY_BASE="https://gh-proxy.com/"
 
 REPO_URL="${CC_WEB_REPO_URL:-$DEFAULT_REPO_URL}"
 BRANCH="${CC_WEB_BRANCH:-$DEFAULT_BRANCH}"
@@ -124,10 +125,48 @@ ensure_install_parent() {
   fi
 }
 
+proxy_git_url() {
+  local url="$1"
+  if [[ "$url" == https://github.com/* ]]; then
+    echo "${GITHUB_PROXY_BASE}${url}"
+  else
+    echo "$url"
+  fi
+}
+
+try_git() {
+  git "$@" 2>/dev/null
+}
+
+git_with_fallback() {
+  local desc="$1"
+  shift
+  local proxy_args=("$@")
+  shift "$#"
+
+  # Reconstruct: caller passes proxy args then -- then direct args
+  # Simpler: caller passes desc, then proxy args array, then direct args array
+  # Let me use a different approach...
+}
+
 install_or_update_repo() {
+  local proxy_repo proxy_insteadof
+
+  proxy_repo="$(proxy_git_url "$REPO_URL")"
+  proxy_insteadof="url.${GITHUB_PROXY_BASE}https://github.com/.insteadOf=https://github.com/"
+
   if [[ ! -e "$INSTALL_DIR" ]]; then
     echo "[install-cn] Cloning $REPO_URL#$BRANCH into $INSTALL_DIR"
-    git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+
+    if ! try_git clone --branch "$BRANCH" "$proxy_repo" "$INSTALL_DIR"; then
+      echo "[install-cn] Proxy clone failed, retrying direct..."
+      if ! try_git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"; then
+        echo "[install-cn] Git clone failed both via proxy and direct. Check your network." >&2
+        exit 1
+      fi
+    fi
+
+    git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL"
     return
   fi
 
@@ -139,13 +178,30 @@ install_or_update_repo() {
 
   echo "[install-cn] Updating existing checkout in $INSTALL_DIR"
   git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL"
-  git -C "$INSTALL_DIR" fetch origin "$BRANCH"
+
+  echo "[install-cn] Git fetch (via proxy)..."
+  if ! try_git -C "$INSTALL_DIR" -c "$proxy_insteadof" fetch origin "$BRANCH"; then
+    echo "[install-cn] Proxy fetch failed, retrying direct..."
+    if ! try_git -C "$INSTALL_DIR" fetch origin "$BRANCH"; then
+      echo "[install-cn] Git fetch failed both via proxy and direct. Check your network." >&2
+      exit 1
+    fi
+  fi
+
   if git -C "$INSTALL_DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
     git -C "$INSTALL_DIR" checkout "$BRANCH"
   else
     git -C "$INSTALL_DIR" checkout --track "origin/$BRANCH"
   fi
-  git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
+
+  echo "[install-cn] Git pull (via proxy)..."
+  if ! try_git -C "$INSTALL_DIR" -c "$proxy_insteadof" pull --ff-only origin "$BRANCH"; then
+    echo "[install-cn] Proxy pull failed, retrying direct..."
+    if ! try_git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"; then
+      echo "[install-cn] Git pull failed both via proxy and direct. Check your network." >&2
+      exit 1
+    fi
+  fi
 }
 
 prepare_env_file() {

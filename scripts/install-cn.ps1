@@ -96,12 +96,40 @@ function Ensure-InstallParent {
   }
 }
 
+function Try-Git {
+  param([string[]]$Arguments)
+  & git @Arguments 2>&1 | Out-Null
+  return $LASTEXITCODE -eq 0
+}
+
+function Invoke-GitWithFallback {
+  param(
+    [string[]]$ProxyArgs,
+    [string[]]$DirectArgs,
+    [string]$Description
+  )
+
+  Write-Info "$Description (via proxy)..."
+  $ok = Try-Git @ProxyArgs
+  if ($ok) { return }
+
+  Write-Info "Proxy failed, retrying $Description direct..."
+  $ok = Try-Git @DirectArgs
+  if (-not $ok) {
+    throw "$Description failed both via proxy and direct. Check your network."
+  }
+}
+
 function Install-OrUpdateRepo {
   $proxyRepo = Proxy-GitUrl $Repo
+  $proxyInsteadOf = "url.$GitHubProxyBase" + "https://github.com/.insteadOf=https://github.com/"
 
   if (-not (Test-Path -LiteralPath $InstallDir)) {
-    Write-Info "Cloning $Repo#$Branch into $InstallDir"
-    Invoke-Checked -FilePath 'git' -Arguments @('clone', '--branch', $Branch, $proxyRepo, $InstallDir)
+    Invoke-GitWithFallback `
+      -ProxyArgs @('clone', '--branch', $Branch, $proxyRepo, $InstallDir) `
+      -DirectArgs @('clone', '--branch', $Branch, $Repo, $InstallDir) `
+      -Description 'Git clone'
+
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'remote', 'set-url', 'origin', $Repo)
     return
   }
@@ -112,7 +140,11 @@ function Install-OrUpdateRepo {
 
   Write-Info "Updating existing checkout in $InstallDir"
   Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'remote', 'set-url', 'origin', $Repo)
-  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, '-c', "url.$GitHubProxyBase.insteadOf=https://github.com/", 'fetch', 'origin', $Branch)
+
+  Invoke-GitWithFallback `
+    -ProxyArgs @('-C', $InstallDir, '-c', $proxyInsteadOf, 'fetch', 'origin', $Branch) `
+    -DirectArgs @('-C', $InstallDir, 'fetch', 'origin', $Branch) `
+    -Description 'Git fetch'
 
   & git -C $InstallDir show-ref --verify --quiet "refs/heads/$Branch"
   $branchExists = $LASTEXITCODE -eq 0
@@ -123,8 +155,10 @@ function Install-OrUpdateRepo {
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', '--track', "origin/$Branch")
   }
 
-  Write-Info 'Updating existing checkout with pull --ff-only'
-  Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, '-c', "url.$GitHubProxyBase.insteadOf=https://github.com/", 'pull', '--ff-only', 'origin', $Branch)
+  Invoke-GitWithFallback `
+    -ProxyArgs @('-C', $InstallDir, '-c', $proxyInsteadOf, 'pull', '--ff-only', 'origin', $Branch) `
+    -DirectArgs @('-C', $InstallDir, 'pull', '--ff-only', 'origin', $Branch) `
+    -Description 'Git pull --ff-only'
 }
 
 function Prepare-EnvFile {
