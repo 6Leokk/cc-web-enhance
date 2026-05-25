@@ -1,35 +1,126 @@
 # CC-Web Enhance
 
-A browser-based remote control panel for Claude Code and Codex CLI. It keeps the local CLI-agent workflow, then adds a lightweight web workspace for sessions, history, background tasks, notifications, and controlled remote access.
+A browser remote control panel for Claude Code / Codex CLI. It wraps local CLI agents in a lightweight web workspace so you can create sessions, resume work, view history, and let long tasks keep running after the browser is closed.
 
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)
 ![License](https://img.shields.io/badge/License-See%20NOTICE-lightgrey)
 
 [中文 README](./README.md) | [Changelog](./CHANGELOG.md) | [Notice](./NOTICE.md)
 
-## Not a Rebranded Upstream README
+## Start Here
 
-This repository is an enhanced fork of [`ZgDaniel/cc-web`](https://github.com/ZgDaniel/cc-web). The enhanced repository is [`6Leokk/cc-web-enhance`](https://github.com/6Leokk/cc-web-enhance). This README describes the current enhanced project instead of reusing the upstream README structure.
+| Your situation | Read this first |
+|----------------|-----------------|
+| Windows, and you want to install directly from GitHub | [Windows One-Command Install](#windows-one-command-install) |
+| You already cloned the repo on Windows | [Windows With An Existing Clone](#windows-with-an-existing-clone) |
+| Linux / macOS / VPS, and you want to install from GitHub | [Linux / macOS One-Command Install](#linux--macos-one-command-install) |
+| You want phone, LAN, ngrok, or frp remote access | [Remote Access](#remote-access) |
+| You only need command names | [Common Commands](#common-commands) |
 
-The enhanced version focuses on:
+## What This Is
+
+This project is an enhanced fork of [`ZgDaniel/cc-web`](https://github.com/ZgDaniel/cc-web). It keeps the native CLI-agent workflow, then adds clearer web sessions, controlled remote access, and regression coverage.
+
+It mainly provides:
 
 - Claude Code and Codex CLI in one web workspace
-- more reliable session switching, refresh recovery, background tasks, and history import
-- local-only defaults with explicit remote-access modes
-- ngrok, frp, public-host, and LAN access paths
+- session switching, refresh recovery, background tasks, and history import
+- local-only defaults, with remote access enabled only when you choose it
+- ngrok, frp, public server, and LAN access modes
 - mainland China deployment scripts that do not mutate host npm configuration
-- regression coverage for sessions, access modes, static delivery, Codex rollout parsing, and related flows
 
-## Who It Is For
+## Windows One-Command Install
 
-- users who want to control local Claude Code / Codex from a browser or phone
-- users who want long-running tasks to continue after the browser closes
-- users who need the same tool on a local machine, LAN, VPS, or NAT-only host
-- developers who want a remote web entry point while keeping CLI-agent behavior
+Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The installer does not install system packages and does not run `npm config set`.
 
-## Mainland China One-Command Install
+Run this in PowerShell:
 
-Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The script does not install system packages and does not run `npm config set`.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Start"
+```
+
+If raw.githubusercontent.com is unstable:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Start"
+```
+
+Default install directory:
+
+```text
+$env:LOCALAPPDATA\cc-web-enhance
+```
+
+Use another install directory:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -InstallDir D:\cc-web-enhance -Start"
+```
+
+Install without starting:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1')))"
+cd "$env:LOCALAPPDATA\cc-web-enhance"
+npm start
+```
+
+Prepare built-in frp during installation:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -WithFrp"
+```
+
+The bootstrap installer `scripts/install-cn.ps1` checks out or updates this repository, then delegates dependency setup to `scripts\deploy\windows-cn.cmd`. It reinstalls dependencies by default. To keep existing `node_modules` and frp download cache:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -NoReset -Start"
+```
+
+Only run remote PowerShell scripts from repositories you trust. If you want to inspect it first, read `scripts/install-cn.ps1` before running it.
+
+### MindFS Mainland Windows One-Command Install
+
+If you are on a mainland China network, the official MindFS Windows installer can fail while downloading the GitHub Release asset. Use this repository's mainland installer instead; it retries through multiple GitHub proxy endpoints before falling back to the direct URL.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://v6.gh-proxy.org/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-mindfs-cn.ps1')))"
+```
+
+Custom proxy endpoints:
+
+```powershell
+$env:MINDFS_GITHUB_PROXY_BASE='https://gh-proxy.com;https://v6.gh-proxy.org'
+```
+
+Default install prefix:
+
+```text
+$env:LOCALAPPDATA\Programs\mindfs
+```
+
+## Windows With An Existing Clone
+
+If you have already cloned the repository on Windows, run the repository-local wrapper:
+
+```cmd
+git clone https://github.com/6Leokk/cc-web-enhance.git
+cd cc-web-enhance
+scripts\deploy\windows-cn.cmd
+npm start
+```
+
+Open after startup:
+
+```text
+http://127.0.0.1:8083
+```
+
+If no password is configured, the server prints a random initial password and requires a password change after first login.
+
+## Linux / macOS One-Command Install
+
+Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The installer does not install system packages and does not run `npm config set`.
 
 Install and start:
 
@@ -80,7 +171,7 @@ Prepare built-in frp during installation:
 curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --with-frp
 ```
 
-The bootstrap installer is `scripts/install-cn.sh`. It checks out this repository, then delegates dependency setup to `scripts/deploy/linux-cn.sh`. The mainland preset installs dependencies with a per-command registry flag equivalent to:
+The bootstrap installer `scripts/install-cn.sh` checks out or updates this repository, then delegates dependency setup to `scripts/deploy/linux-cn.sh`. The mainland preset installs dependencies with a per-command registry flag equivalent to:
 
 ```bash
 npm install --registry=https://registry.npmmirror.com
@@ -92,43 +183,7 @@ It defaults to `--reset`, removing `node_modules`, `frp/bin`, and `frp/tmp` befo
 bash scripts/deploy/linux-cn.sh --no-reset
 ```
 
-Windows users can run this inside the repository:
-
-```cmd
-scripts\deploy\windows-cn.cmd
-```
-
-## Manual Install
-
-Linux / macOS:
-
-```bash
-git clone https://github.com/6Leokk/cc-web-enhance.git
-cd cc-web-enhance
-npm install
-cp .env.example .env
-npm start
-```
-
-Windows:
-
-```cmd
-git clone https://github.com/6Leokk/cc-web-enhance.git
-cd cc-web-enhance
-npm install
-copy .env.example .env
-node server.js
-```
-
-Open after startup:
-
-```text
-http://127.0.0.1:8083
-```
-
-If no password is configured, the server prints a random initial password and requires a password change after first login.
-
-## Remote Access Choices
+## Remote Access
 
 The default mode is local-only: `CC_WEB_ACCESS_MODE=direct` + `CC_WEB_DIRECT_SCOPE=local`, bound to `127.0.0.1:8083`.
 
@@ -174,8 +229,8 @@ See [docs/deploy-frp.md](./docs/deploy-frp.md) for the full frp guide.
 npm start                 # Start cc-web
 npm run start:ngrok       # Configure and start ngrok mode
 npm run setup:ngrok       # Write ngrok config only
-npm run deploy:cn         # Mainland deployment preset
-npm run deploy:global     # Global deployment preset
+npm run deploy:cn         # Mainland dependency install preset
+npm run deploy:global     # Global dependency install preset
 npm run frp:download      # Download and verify frp
 npm run frp:setup         # Generate frp config
 npm run frp:start         # Start frp
@@ -197,6 +252,7 @@ npm run regression        # Run regression checks
 
 - [docs/deploy-frp.md](./docs/deploy-frp.md): self-hosted frp deployment
 - [docs/intranet-access-design.md](./docs/intranet-access-design.md): access-mode design
+- [docs/testing-usage-telemetry.md](./docs/testing-usage-telemetry.md): Claude / Codex usage telemetry testing guide
 - [docs/security/intranet-access-threat-model.md](./docs/security/intranet-access-threat-model.md): threat model
 - [docs/security/intranet-access-security-review.md](./docs/security/intranet-access-security-review.md): security review notes
 - [CHANGELOG.md](./CHANGELOG.md): release history
