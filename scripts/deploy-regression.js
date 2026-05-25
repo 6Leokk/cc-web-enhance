@@ -153,7 +153,7 @@ function checkWrappersAndDocs() {
   ]) {
     const content = read(filePath);
     assertIncludes(content, 'scripts/deploy.js', `${filePath} should call the shared deploy core`);
-    assertIncludes(content, '--reset', `${filePath} should default to a clean rebuild`);
+    assertNotIncludes(content, '--reset', `${filePath} should not hardcode --reset (default is in deploy.js)`);
     assertNotIncludes(content, 'npm config', `${filePath} should not mutate npm config`);
   }
 

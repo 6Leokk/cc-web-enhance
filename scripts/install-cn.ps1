@@ -50,6 +50,7 @@ function Invoke-Checked {
     [string]$WorkingDirectory = ''
   )
 
+  $exitCode = $null
   $previousLocation = $null
   if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
     $previousLocation = Get-Location
@@ -65,6 +66,9 @@ function Invoke-Checked {
     }
   }
 
+  if ($null -eq $exitCode) {
+    throw "Command execution failed (no exit code): $FilePath $($Arguments -join ' ')"
+  }
   if ($exitCode -ne 0) {
     throw "Command failed ($exitCode): $FilePath $($Arguments -join ' ')"
   }

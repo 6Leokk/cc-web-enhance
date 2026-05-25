@@ -30,7 +30,7 @@ function parseArgs(argv) {
     withFrp: null,
     start: false,
     skipInstall: false,
-    reset: false,
+    reset: true,
     nonInteractive: false,
     npmRegistry: '',
     githubProxyBase: '',

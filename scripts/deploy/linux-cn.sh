@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-node scripts/deploy.js --profile cn --reset "$@"
+node scripts/deploy.js --profile cn "$@"

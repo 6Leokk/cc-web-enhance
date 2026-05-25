@@ -138,17 +138,6 @@ try_git() {
   git "$@" 2>/dev/null
 }
 
-git_with_fallback() {
-  local desc="$1"
-  shift
-  local proxy_args=("$@")
-  shift "$#"
-
-  # Reconstruct: caller passes proxy args then -- then direct args
-  # Simpler: caller passes desc, then proxy args array, then direct args array
-  # Let me use a different approach...
-}
-
 install_or_update_repo() {
   local proxy_repo proxy_insteadof
 
