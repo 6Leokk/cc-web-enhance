@@ -36,6 +36,12 @@ Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The inst
 Run this in PowerShell:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Start"
+```
+
+If raw.githubusercontent.com is unstable, use the proxy fallback (auto-timeout):
+
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$s=irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{$s=irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15};iex $s -Start"
 ```
 
@@ -48,13 +54,13 @@ $env:LOCALAPPDATA\cc-web-enhance
 Use another install directory:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$s=irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{$s=irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15};iex $s -InstallDir D:\cc-web-enhance -Start"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -InstallDir D:\cc-web-enhance -Start"
 ```
 
 Install without starting:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$s=irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{$s=irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15};iex $s"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1')))"
 cd "$env:LOCALAPPDATA\cc-web-enhance"
 npm start
 ```
@@ -62,13 +68,13 @@ npm start
 Prepare built-in frp during installation:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$s=irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{$s=irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15};iex $s -WithFrp"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -WithFrp"
 ```
 
 The bootstrap installer `scripts/install-cn.ps1` checks out or updates this repository, then delegates dependency setup to `scripts\deploy\windows-cn.cmd`. It reinstalls dependencies by default. To keep existing `node_modules` and frp download cache:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$s=irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{$s=irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15};iex $s -NoReset -Start"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -NoReset -Start"
 ```
 
 Only run remote PowerShell scripts from repositories you trust. If you want to inspect it first, read `scripts/install-cn.ps1` before running it.
@@ -99,6 +105,12 @@ Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The inst
 Install and start:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --start
+```
+
+If raw.githubusercontent.com is unstable, use the proxy fallback (auto-timeout):
+
+```bash
 (curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --start
 ```
 
@@ -122,13 +134,13 @@ Directory layout:
 Use another install directory:
 
 ```bash
-(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
 ```
 
 Install without starting:
 
 ```bash
-(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash
 cd /opt/cc-web-enhance
 npm start
 ```
@@ -136,7 +148,7 @@ npm start
 Prepare built-in frp during installation:
 
 ```bash
-(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --with-frp
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --with-frp
 ```
 
 The bootstrap installer `scripts/install-cn.sh` checks out or updates this repository, then delegates dependency setup to `scripts/deploy/linux-cn.sh`. The mainland preset installs dependencies with a per-command registry flag equivalent to:
