@@ -102,7 +102,8 @@ function Ensure-InstallParent {
 
 function Try-Git {
   param([string[]]$Arguments)
-  & git @Arguments *>$null
+  $ErrorActionPreference = 'SilentlyContinue'
+  & git @Arguments >$null 2>$null
   return $LASTEXITCODE -eq 0
 }
 
