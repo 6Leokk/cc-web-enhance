@@ -6,7 +6,11 @@ param(
   [switch]$Reconfigure,
   [string]$Branch,
   [string]$Repo,
-  [string]$InstallDir
+  [string]$InstallDir,
+  [string]$Token,
+  [string]$Domain,
+  [string]$BasicAuth,
+  [string]$Password
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +34,18 @@ if ([string]::IsNullOrWhiteSpace($Branch)) {
 }
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
   $InstallDir = if ([string]::IsNullOrWhiteSpace($env:CC_WEB_INSTALL_DIR)) { $DefaultInstallDir } else { $env:CC_WEB_INSTALL_DIR }
+}
+if ([string]::IsNullOrWhiteSpace($Token)) {
+  $Token = if ([string]::IsNullOrWhiteSpace($env:NGROK_AUTHTOKEN)) { '' } else { $env:NGROK_AUTHTOKEN }
+}
+if ([string]::IsNullOrWhiteSpace($Domain)) {
+  $Domain = if ([string]::IsNullOrWhiteSpace($env:NGROK_DOMAIN)) { '' } else { $env:NGROK_DOMAIN }
+}
+if ([string]::IsNullOrWhiteSpace($BasicAuth)) {
+  $BasicAuth = if ([string]::IsNullOrWhiteSpace($env:NGROK_BASIC_AUTH)) { '' } else { $env:NGROK_BASIC_AUTH }
+}
+if ([string]::IsNullOrWhiteSpace($Password)) {
+  $Password = if ([string]::IsNullOrWhiteSpace($env:CC_WEB_PASSWORD)) { '' } else { $env:CC_WEB_PASSWORD }
 }
 
 function Write-Info {
@@ -180,9 +196,27 @@ function Install-OrUpdateRepo {
     -NoThrow
 
   if (-not $pulled) {
-    Write-Info 'Branch diverged from remote (likely rebase). Resetting to match origin...'
-    Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'reset', '--hard', "origin/$Branch")
+    throw 'Branch diverged from remote or has local changes that prevent a fast-forward update. Resolve the checkout manually, or reinstall into a fresh directory.'
   }
+}
+
+function Set-EnvValue {
+  param([string]$FilePath, [string]$Key, [string]$Value)
+  $lines = if (Test-Path -LiteralPath $FilePath) { @(Get-Content -LiteralPath $FilePath) } else { @() }
+  $replaced = $false
+  $output = @()
+  foreach ($line in $lines) {
+    if ($line -match "^${Key}=") {
+      $output += "${Key}=${Value}"
+      $replaced = $true
+    } else {
+      $output += $line
+    }
+  }
+  if (-not $replaced) {
+    $output += "${Key}=${Value}"
+  }
+  Set-Content -LiteralPath $FilePath -Value ($output -join "`n") -NoNewline
 }
 
 function Prepare-EnvFile {
@@ -197,6 +231,27 @@ function Prepare-EnvFile {
     }
   } else {
     Write-Info 'Keeping existing .env'
+  }
+
+  # Inject ngrok config if -Token was provided
+  if (-not [string]::IsNullOrWhiteSpace($Token)) {
+    Write-Info 'Configuring ngrok access mode'
+    Set-EnvValue -FilePath $envPath -Key 'CC_WEB_ACCESS_MODE' -Value 'ngrok'
+    Set-EnvValue -FilePath $envPath -Key 'CC_WEB_HOST' -Value '127.0.0.1'
+    Set-EnvValue -FilePath $envPath -Key 'NGROK_AUTHTOKEN' -Value $Token
+    if (-not [string]::IsNullOrWhiteSpace($Domain)) {
+      Set-EnvValue -FilePath $envPath -Key 'NGROK_DOMAIN' -Value $Domain
+    }
+    if (-not [string]::IsNullOrWhiteSpace($BasicAuth)) {
+      Set-EnvValue -FilePath $envPath -Key 'NGROK_BASIC_AUTH' -Value $BasicAuth
+    }
+    Set-EnvValue -FilePath $envPath -Key 'NGROK_AUTO_START' -Value '1'
+  }
+
+  # Inject password if provided (empty = auto-generate by server)
+  if (-not [string]::IsNullOrWhiteSpace($Password)) {
+    Write-Info 'Setting cc-web login password'
+    Set-EnvValue -FilePath $envPath -Key 'CC_WEB_PASSWORD' -Value $Password
   }
 }
 
@@ -233,6 +288,8 @@ function Show-NextSteps {
 #   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Start"
 #   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -InstallDir D:\cc-web-enhance -Start"
 #   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -WithFrp -NoReset"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Token <ngrok-token> -Start"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -Token <ngrok-token> -Password <pw> -Start"
 
 Require-Command git
 Require-Command node

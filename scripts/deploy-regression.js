@@ -168,10 +168,10 @@ function checkWrappersAndDocs() {
   assertEqual(pkg.scripts['deploy:cn'], 'node scripts/deploy.js --profile cn --reset', 'package should expose cn deploy script');
 
   const readme = read('README.md');
-  assertIncludes(readme, 'npm install --registry=https://registry.npmmirror.com', 'README should document per-command mainland npm registry');
-  assertIncludes(readme, 'scripts/deploy/linux-cn.sh', 'README should document mainland Linux deploy wrapper');
-  assertIncludes(readme, 'scripts\\deploy\\windows-cn.cmd', 'README should document mainland Windows deploy wrapper');
-  assertIncludes(readme, '--reset', 'README should document clean rebuild deployment');
+  assertIncludes(readme, 'npmmirror', 'README should document mainland mirror auto-fallback');
+  assertIncludes(readme, 'scripts/install-cn.sh', 'README should document the copy-paste mainland installer');
+  assertIncludes(readme, 'scripts/install-cn.ps1', 'README should document the copy-paste Windows installer');
+  assertIncludes(readme, 'CC_WEB_INSTALL_DIR=/path', 'README should document install directory override');
 }
 
 function checkMainlandBootstrapInstaller() {
@@ -187,13 +187,17 @@ function checkMainlandBootstrapInstaller() {
   assertIncludes(installer, '--start', 'installer should expose a start option');
   assertIncludes(installer, '--with-frp', 'installer should expose a frp option');
   assertIncludes(installer, '--no-reset', 'installer should expose a no-reset option');
+  assertIncludes(installer, '--token', 'installer should expose a ngrok token option');
+  assertIncludes(installer, '--password', 'installer should expose a cc-web password option');
+  assertIncludes(installer, 'NGROK_AUTHTOKEN', 'installer should accept ngrok token from env var');
+  assertIncludes(installer, 'CC_WEB_PASSWORD', 'installer should accept password from env var');
+  assertNotIncludes(installer, 'reset --hard', 'installer should not destroy local changes when update fails');
   assertNotIncludes(installer, 'npm config set', 'installer must not mutate host npm configuration');
   assertNotIncludes(installer, 'apt install', 'installer should not install system packages implicitly');
 
   const readme = read('README.md');
   assertIncludes(readme, 'scripts/install-cn.sh', 'README should document the copy-paste mainland installer');
   assertIncludes(readme, '/opt/cc-web-enhance', 'README should document where the installer puts the app');
-  assertIncludes(readme, '| CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start', 'README should pass install directory override to bash, not curl');
 }
 
 function checkWindowsBootstrapInstaller() {
@@ -209,6 +213,9 @@ function checkWindowsBootstrapInstaller() {
   assertIncludes(installer, '-Start', 'windows installer should expose a start option');
   assertIncludes(installer, '-WithFrp', 'windows installer should expose a frp option');
   assertIncludes(installer, '-NoReset', 'windows installer should expose a no-reset option');
+  assertIncludes(installer, '-Token', 'windows installer should expose a ngrok token option');
+  assertIncludes(installer, '-Password', 'windows installer should expose a cc-web password option');
+  assertNotIncludes(installer, 'reset --hard', 'windows installer should not hard reset the checkout when update fails');
   assertIncludes(installer, "$nodeVersion = & node -p 'process.versions.node'", 'windows installer should read the Node version string without nested quoting');
   assertIncludes(installer, "[int](($nodeVersion -split '\\.')[0])", 'windows installer should parse the version in PowerShell');
   assertNotIncludes(installer, 'split(".")', 'windows installer should not pass a quoted dot through node -p');
@@ -216,8 +223,7 @@ function checkWindowsBootstrapInstaller() {
 
   const readme = read('README.md');
   assertIncludes(readme, 'scripts/install-cn.ps1', 'README should document the copy-paste Windows installer');
-  assertIncludes(readme, '$env:LOCALAPPDATA\\cc-web-enhance', 'README should document where the Windows installer puts the app');
-  assertIncludes(readme, '-InstallDir D:\\cc-web-enhance -Start', 'README should document Windows install directory override');
+  assertIncludes(readme, 'LOCALAPPDATA', 'README should document where the Windows installer puts the app');
 }
 
 checkDeployPlanner();

@@ -14,6 +14,10 @@ START_AFTER_INSTALL=0
 WITH_FRP=0
 NO_RESET=0
 RECONFIGURE=0
+NGROK_TOKEN="${NGROK_AUTHTOKEN:-}"
+NGROK_DOMAIN="${NGROK_DOMAIN:-}"
+NGROK_BASIC_AUTH="${NGROK_BASIC_AUTH:-}"
+CC_PASSWORD="${CC_WEB_PASSWORD:-}"
 
 usage() {
   cat <<'EOF'
@@ -22,6 +26,10 @@ Usage: install-cn.sh [options]
 Options:
   --start                 Start cc-web after installation
   --with-frp              Download and generate built-in frp config during setup
+  --token <token>         ngrok authtoken (implies ngrok access mode)
+  --domain <domain>       ngrok reserved domain (optional)
+  --basic-auth <user:pass> ngrok basic auth (optional)
+  --password <pw>         cc-web login password (empty = auto-generate)
   --reconfigure           Force re-running the setup wizard
   --no-reset              Keep existing node_modules and frp download cache
   --branch <name>         Git branch to install, default: main
@@ -33,6 +41,10 @@ Environment overrides:
   CC_WEB_INSTALL_DIR      Installation directory
   CC_WEB_BRANCH           Git branch
   CC_WEB_REPO_URL         Git repository URL
+  NGROK_AUTHTOKEN         ngrok authtoken (alternative to --token)
+  NGROK_DOMAIN            ngrok domain (alternative to --domain)
+  NGROK_BASIC_AUTH        ngrok basic auth (alternative to --basic-auth)
+  CC_WEB_PASSWORD         cc-web login password (alternative to --password)
 EOF
 }
 
@@ -88,6 +100,42 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install-dir=*)
       INSTALL_DIR="${1#--install-dir=}"
+      shift
+      ;;
+    --token)
+      need_value "$1" "${2:-}"
+      NGROK_TOKEN="$2"
+      shift 2
+      ;;
+    --token=*)
+      NGROK_TOKEN="${1#--token=}"
+      shift
+      ;;
+    --domain)
+      need_value "$1" "${2:-}"
+      NGROK_DOMAIN="$2"
+      shift 2
+      ;;
+    --domain=*)
+      NGROK_DOMAIN="${1#--domain=}"
+      shift
+      ;;
+    --basic-auth)
+      need_value "$1" "${2:-}"
+      NGROK_BASIC_AUTH="$2"
+      shift 2
+      ;;
+    --basic-auth=*)
+      NGROK_BASIC_AUTH="${1#--basic-auth=}"
+      shift
+      ;;
+    --password)
+      need_value "$1" "${2:-}"
+      CC_PASSWORD="$2"
+      shift 2
+      ;;
+    --password=*)
+      CC_PASSWORD="${1#--password=}"
       shift
       ;;
     -h|--help)
@@ -196,22 +244,51 @@ install_or_update_repo() {
   if ! try_git -C "$INSTALL_DIR" -c "$proxy_insteadof" pull --ff-only origin "$BRANCH"; then
     echo "[install-cn] Proxy pull failed, retrying direct..."
     if ! try_git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"; then
-      echo "[install-cn] Branch diverged from remote (likely rebase). Resetting to match origin..."
-      git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
+      echo "[install-cn] Branch diverged from remote or has local changes that prevent a fast-forward update." >&2
+      echo "[install-cn] Please resolve the checkout manually, or reinstall into a fresh directory." >&2
+      exit 1
     fi
   fi
 }
 
 prepare_env_file() {
-  if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+  local env_path="$INSTALL_DIR/.env"
+  if [[ ! -f "$env_path" ]]; then
     if [[ -f "$INSTALL_DIR/.env.example" ]]; then
-      cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+      cp "$INSTALL_DIR/.env.example" "$env_path"
       echo "[install-cn] Created .env from .env.example"
     else
       echo "[install-cn] Warning: .env.example not found; skipping .env creation"
     fi
   else
     echo "[install-cn] Keeping existing .env"
+  fi
+
+  # Inject ngrok config if --token was provided
+  if [[ -n "$NGROK_TOKEN" ]]; then
+    echo "[install-cn] Configuring ngrok access mode"
+    set_env_value "$env_path" CC_WEB_ACCESS_MODE ngrok
+    set_env_value "$env_path" CC_WEB_HOST 127.0.0.1
+    set_env_value "$env_path" NGROK_AUTHTOKEN "$NGROK_TOKEN"
+    [[ -n "$NGROK_DOMAIN" ]] && set_env_value "$env_path" NGROK_DOMAIN "$NGROK_DOMAIN"
+    [[ -n "$NGROK_BASIC_AUTH" ]] && set_env_value "$env_path" NGROK_BASIC_AUTH "$NGROK_BASIC_AUTH"
+    set_env_value "$env_path" NGROK_AUTO_START 1
+  fi
+
+  # Inject password if provided (empty = auto-generate by server)
+  if [[ -n "$CC_PASSWORD" ]]; then
+    echo "[install-cn] Setting cc-web login password"
+    set_env_value "$env_path" CC_WEB_PASSWORD "$CC_PASSWORD"
+  fi
+}
+
+# Set or update a KEY=VALUE line in an env file (idempotent)
+set_env_value() {
+  local file="$1" key="$2" value="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
   fi
 }
 
