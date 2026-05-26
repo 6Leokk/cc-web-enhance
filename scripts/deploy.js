@@ -268,15 +268,19 @@ function runRemovePath(step, options = {}) {
 async function runDeploy(options = {}) {
   const cwd = options.cwd || REPO_ROOT;
   const envPath = path.join(cwd, '.env');
+  const examplePath = path.join(cwd, '.env.example');
   const envExists = fs.existsSync(envPath);
+  const exampleExists = fs.existsSync(examplePath);
 
-  if (!envExists && !options.nonInteractive && process.stdin.isTTY) {
+  const envIsUnconfigured = envExists && exampleExists
+    && fs.readFileSync(envPath, 'utf8') === fs.readFileSync(examplePath, 'utf8');
+
+  if ((!envExists || envIsUnconfigured) && !options.nonInteractive && process.stdin.isTTY) {
     try {
       const wizardEnv = await runSetupWizard(options);
       if (wizardEnv) {
-        const sourcePath = path.join(cwd, '.env.example');
-        if (fs.existsSync(sourcePath)) {
-          fs.copyFileSync(sourcePath, envPath);
+        if (exampleExists && !envExists) {
+          fs.copyFileSync(examplePath, envPath);
         }
         writeEnvFile(envPath, wizardEnv);
       }
