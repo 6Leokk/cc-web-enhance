@@ -209,10 +209,7 @@ prepare_env_file() {
 }
 
 run_deploy() {
-  local args=()
-  if [[ "$NO_RESET" -eq 1 ]]; then
-    args+=(--no-reset)
-  fi
+  local args=(--no-reset)
   if [[ "$WITH_FRP" -eq 1 ]]; then
     args+=(--with-frp)
   fi

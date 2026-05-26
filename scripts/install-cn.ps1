@@ -199,10 +199,7 @@ function Prepare-EnvFile {
 }
 
 function Run-Deploy {
-  $deployArgs = @()
-  if ($NoReset) {
-    $deployArgs += '--no-reset'
-  }
+  $deployArgs = @('--no-reset')
   if ($WithFrp) {
     $deployArgs += '--with-frp'
   }
