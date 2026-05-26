@@ -425,7 +425,7 @@ function writeEnvFile(filePath, values) {
 
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined || value === null) continue;
-    const pattern = new RegExp(`^#?\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=.*`, 'm');
+    const pattern = new RegExp(`^#?[^\\S\\n]*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=.*`, 'm');
     const replacement = `${key}=${value}`;
     if (pattern.test(content)) {
       content = content.replace(pattern, replacement);

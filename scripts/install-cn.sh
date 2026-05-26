@@ -148,7 +148,9 @@ install_or_update_repo() {
     echo "[install-cn] Cloning $REPO_URL#$BRANCH into $INSTALL_DIR"
 
     if ! try_git clone --branch "$BRANCH" "$proxy_repo" "$INSTALL_DIR"; then
-      echo "[install-cn] Proxy clone failed, retrying direct..."
+      echo "[install-cn] Proxy clone failed, cleaning up partial directory..."
+      rm -rf "$INSTALL_DIR"
+      echo "[install-cn] Retrying direct..."
       if ! try_git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"; then
         echo "[install-cn] Git clone failed both via proxy and direct. Check your network." >&2
         exit 1
@@ -195,8 +197,12 @@ install_or_update_repo() {
 
 prepare_env_file() {
   if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-    cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-    echo "[install-cn] Created .env from .env.example"
+    if [[ -f "$INSTALL_DIR/.env.example" ]]; then
+      cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+      echo "[install-cn] Created .env from .env.example"
+    else
+      echo "[install-cn] Warning: .env.example not found; skipping .env creation"
+    fi
   else
     echo "[install-cn] Keeping existing .env"
   fi

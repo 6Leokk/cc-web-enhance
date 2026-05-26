@@ -110,12 +110,18 @@ function Invoke-GitWithFallback {
   param(
     [string[]]$ProxyArgs,
     [string[]]$DirectArgs,
-    [string]$Description
+    [string]$Description,
+    [string]$CleanupPath = ''
   )
 
   Write-Info "$Description (via proxy)..."
   $ok = Try-Git -Arguments $ProxyArgs
   if ($ok) { return }
+
+  if ($CleanupPath -and (Test-Path -LiteralPath $CleanupPath)) {
+    Write-Info "Cleaning up partial directory from failed proxy attempt..."
+    Remove-Item -Recurse -Force -LiteralPath $CleanupPath
+  }
 
   Write-Info "Proxy failed, retrying $Description direct..."
   $ok = Try-Git -Arguments $DirectArgs
@@ -132,7 +138,8 @@ function Install-OrUpdateRepo {
     Invoke-GitWithFallback `
       -ProxyArgs @('clone', '--branch', $Branch, $proxyRepo, $InstallDir) `
       -DirectArgs @('clone', '--branch', $Branch, $Repo, $InstallDir) `
-      -Description 'Git clone'
+      -Description 'Git clone' `
+      -CleanupPath $InstallDir
 
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'remote', 'set-url', 'origin', $Repo)
     return
@@ -168,8 +175,13 @@ function Install-OrUpdateRepo {
 function Prepare-EnvFile {
   $envPath = Join-Path $InstallDir '.env'
   if (-not (Test-Path -LiteralPath $envPath)) {
-    Copy-Item -LiteralPath (Join-Path $InstallDir '.env.example') -Destination $envPath
-    Write-Info 'Created .env from .env.example'
+    $examplePath = Join-Path $InstallDir '.env.example'
+    if (Test-Path -LiteralPath $examplePath) {
+      Copy-Item -LiteralPath $examplePath -Destination $envPath
+      Write-Info 'Created .env from .env.example'
+    } else {
+      Write-Warning '.env.example not found; skipping .env creation'
+    }
   } else {
     Write-Info 'Keeping existing .env'
   }
