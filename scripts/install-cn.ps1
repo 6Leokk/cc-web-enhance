@@ -3,6 +3,7 @@ param(
   [switch]$Start,
   [switch]$WithFrp,
   [switch]$NoReset,
+  [switch]$Reconfigure,
   [string]$Branch,
   [string]$Repo,
   [string]$InstallDir
@@ -201,6 +202,9 @@ function Prepare-EnvFile {
 
 function Run-Deploy {
   $deployArgs = @('--no-reset')
+  if ($Reconfigure) {
+    $deployArgs += '--reconfigure'
+  }
   if ($WithFrp) {
     $deployArgs += '--with-frp'
   }

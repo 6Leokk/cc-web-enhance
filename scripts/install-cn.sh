@@ -13,6 +13,7 @@ INSTALL_DIR="${CC_WEB_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 START_AFTER_INSTALL=0
 WITH_FRP=0
 NO_RESET=0
+RECONFIGURE=0
 
 usage() {
   cat <<'EOF'
@@ -21,6 +22,7 @@ Usage: install-cn.sh [options]
 Options:
   --start                 Start cc-web after installation
   --with-frp              Download and generate built-in frp config during setup
+  --reconfigure           Force re-running the setup wizard
   --no-reset              Keep existing node_modules and frp download cache
   --branch <name>         Git branch to install, default: main
   --repo <url>            Git repository URL
@@ -51,6 +53,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-frp)
       WITH_FRP=1
+      shift
+      ;;
+    --reconfigure)
+      RECONFIGURE=1
       shift
       ;;
     --no-reset)
@@ -211,6 +217,9 @@ prepare_env_file() {
 
 run_deploy() {
   local args=(--no-reset)
+  if [[ "$RECONFIGURE" -eq 1 ]]; then
+    args+=(--reconfigure)
+  fi
   if [[ "$WITH_FRP" -eq 1 ]]; then
     args+=(--with-frp)
   fi
