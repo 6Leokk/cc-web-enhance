@@ -17,13 +17,41 @@ Prerequisites: `git`, `Node.js >= 18`, `npm`.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -Start"
 ```
 
+<details>
+<summary>Network issues? Use mirror proxy command</summary>
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "`$s=try{irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2' -TimeoutSec 15}catch{irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2' -TimeoutSec 15}; & ([scriptblock]::Create(`$s)) -Start"
+```
+</details>
+
 ### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --start
 ```
 
-> The install script auto-falls-back to gh-proxy when raw.githubusercontent.com is unreachable, and uses npmmirror for npm in mainland China. No manual mirror config needed.
+<details>
+<summary>Network issues? Use mirror proxy command</summary>
+
+```bash
+(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2) | bash -s -- --start
+```
+</details>
+
+### One-command deploy with ngrok
+
+```bash
+# Linux — ngrok + custom password (omit --password to auto-generate)
+curl -fsSL ...install-cn.sh?v=2 | bash -s -- --start --token <ngrok-token> --password <password>
+```
+
+```powershell
+# Windows
+powershell ... -Token <ngrok-token> -Password <password> -Start
+```
+
+> The install script auto-falls-back to gh-proxy and npmmirror npm mirror. No manual mirror config needed.
 
 Installs to: Windows `%LOCALAPPDATA%\cc-web-enhance`, Linux/macOS `/opt/cc-web-enhance` (requires sudo; custom path: `CC_WEB_INSTALL_DIR=/path bash`).
 The server starts automatically — open `http://127.0.0.1:8083` in your browser.

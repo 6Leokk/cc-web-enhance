@@ -17,13 +17,41 @@
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -Start"
 ```
 
+<details>
+<summary>网络不稳定？用镜像代理命令</summary>
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "`$s=try{irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2' -TimeoutSec 15}catch{irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2' -TimeoutSec 15}; & ([scriptblock]::Create(`$s)) -Start"
+```
+</details>
+
 ### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --start
 ```
 
-> 安装脚本内置镜像自动切换 — raw.githubusercontent.com 不稳定时自动走 gh-proxy，国内 npm 走 npmmirror。无需手动配置。
+<details>
+<summary>网络不稳定？用镜像代理命令</summary>
+
+```bash
+(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2) | bash -s -- --start
+```
+</details>
+
+### 带 ngrok 一键部署
+
+```bash
+# Linux — ngrok + 自定义密码（或不传 --password 自动生成）
+curl -fsSL ...install-cn.sh?v=2 | bash -s -- --start --token <ngrok-token> --password <password>
+```
+
+```powershell
+# Windows
+powershell ... -Token <ngrok-token> -Password <password> -Start
+```
+
+> 安装脚本内置镜像自动切换 — gh-proxy 代理和 npmmirror npm 镜像均为自动 fallback，无需手动配置。
 
 安装目录：Windows `%LOCALAPPDATA%\cc-web-enhance`，Linux/macOS `/opt/cc-web-enhance`（需 sudo 权限，可自定义：`CC_WEB_INSTALL_DIR=/path bash`）。
 安装完成后自动启动，浏览器打开 `http://127.0.0.1:8083` 即可使用。
