@@ -209,6 +209,24 @@ npm start
 
 frp 详细步骤见 [docs/deploy-frp.md](./docs/deploy-frp.md)。
 
+## 重置配置
+
+删除 `.env` 文件后重启，安装脚本会自动弹出配置向导：
+
+```powershell
+# Windows
+Remove-Item -Force "$env:LOCALAPPDATA\cc-web-enhance\.env"
+npm start
+```
+
+```bash
+# Linux / macOS
+rm -f /opt/cc-web-enhance/.env
+npm start
+```
+
+或者用 `npm run reconfigure` 直接重新配置（不需要删文件）。
+
 ## 常用命令
 
 ```bash

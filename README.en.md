@@ -209,6 +209,24 @@ Built-in frp runtime files live under `frp/bin/`, `frp/conf/`, `frp/logs/`, `frp
 
 See [docs/deploy-frp.md](./docs/deploy-frp.md) for the full frp guide.
 
+## Reset Configuration
+
+Delete the `.env` file and restart — the setup wizard will appear automatically:
+
+```powershell
+# Windows
+Remove-Item -Force "$env:LOCALAPPDATA\cc-web-enhance\.env"
+npm start
+```
+
+```bash
+# Linux / macOS
+rm -f /opt/cc-web-enhance/.env
+npm start
+```
+
+Or use `npm run reconfigure` to reconfigure directly (no file deletion needed).
+
 ## Common Commands
 
 ```bash
