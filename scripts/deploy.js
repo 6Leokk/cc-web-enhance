@@ -322,26 +322,11 @@ function question(rl, promptText) {
   });
 }
 
-function hiddenQuestion(promptText) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: true,
-    });
-    rl._writeToOutput = function _writeToOutput(stringToWrite) {
-      if (stringToWrite === promptText || stringToWrite === '\r\n' || stringToWrite === '\n') {
-        rl.output.write(stringToWrite);
-      } else {
-        rl.output.write('*'.repeat(Math.max(1, String(stringToWrite).length)));
-      }
-    };
-    rl.question(promptText, (answer) => {
-      rl.close();
-      process.stdout.write('\n');
-      resolve(String(answer || '').trim());
-    });
-  });
+function hiddenQuestion(rl, promptText) {
+  // On Windows PowerShell the terminal echo bypasses _writeToOutput,
+  // causing interleaved * and characters. Use plain question() instead
+  // — this is a local setup wizard, not a login screen.
+  return question(rl, promptText);
 }
 
 const WIZARD_I18N = {
@@ -444,7 +429,7 @@ async function runSetupWizard(options = {}) {
       env.CC_WEB_ACCESS_MODE = 'ngrok';
       console.log(t.ngrokTitle);
       console.log(t.ngrokHint);
-      const token = await hiddenQuestion(t.ngrokToken);
+      const token = await hiddenQuestion(rl, t.ngrokToken);
       if (!token) throw new Error(t.ngrokTokenErr);
       env.NGROK_AUTHTOKEN = token;
       const domain = await question(rl, t.ngrokDomain);
@@ -461,7 +446,7 @@ async function runSetupWizard(options = {}) {
       env.FRP_SERVER_ADDR = serverAddr;
       const serverPort = await question(rl, t.frpPort);
       env.FRP_SERVER_PORT = serverPort || '7000';
-      const token = await hiddenQuestion(t.frpToken);
+      const token = await hiddenQuestion(rl, t.frpToken);
       if (!token) throw new Error(t.frpTokenErr);
       env.FRP_TOKEN = token;
       const publicPort = await question(rl, t.frpPublicPort);
