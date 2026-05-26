@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# cc-web-enhance install-cn.sh v2
 set -euo pipefail
 
 DEFAULT_REPO_URL="https://github.com/6Leokk/cc-web-enhance.git"

@@ -105,13 +105,13 @@ http://127.0.0.1:8083
 默认安装并启动：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --start
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --start
 ```
 
 如果 raw.githubusercontent.com 访问不稳定，可使用代理入口（自动超时回退）：
 
 ```bash
-(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --start
+(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --start
 ```
 
 默认安装目录：
@@ -134,13 +134,13 @@ curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/
 更换安装目录：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
 ```
 
 安装但不启动：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash
 cd /opt/cc-web-enhance
 npm start
 ```
@@ -148,7 +148,7 @@ npm start
 同时准备内置 frp：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --with-frp
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --with-frp
 ```
 
 安装器 `scripts/install-cn.sh` 会先拉取或更新仓库，然后调用 `scripts/deploy/linux-cn.sh`。大陆 preset 使用的依赖安装方式等价于：

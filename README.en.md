@@ -105,13 +105,13 @@ Prerequisites: `git`, `Node.js >= 18`, and `npm` are already installed. The inst
 Install and start:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --start
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --start
 ```
 
 If raw.githubusercontent.com is unstable, use the proxy fallback (auto-timeout):
 
 ```bash
-(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --start
+(curl -fsSL --connect-timeout 15 https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 || curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh) | bash -s -- --start
 ```
 
 Default install directory:
@@ -134,13 +134,13 @@ Directory layout:
 Use another install directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | CC_WEB_INSTALL_DIR=/data/cc-web-enhance bash -s -- --start
 ```
 
 Install without starting:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash
 cd /opt/cc-web-enhance
 npm start
 ```
@@ -148,7 +148,7 @@ npm start
 Prepare built-in frp during installation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh | bash -s -- --with-frp
+curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.sh?v=2 | bash -s -- --with-frp
 ```
 
 The bootstrap installer `scripts/install-cn.sh` checks out or updates this repository, then delegates dependency setup to `scripts/deploy/linux-cn.sh`. The mainland preset installs dependencies with a per-command registry flag equivalent to:
