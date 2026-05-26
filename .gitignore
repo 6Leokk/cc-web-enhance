@@ -9,6 +9,13 @@ attachments/
 config/
 CLAUDE.md
 AGENTS.md
+task_plan.md
+findings.md
+progress.md
+docs/superpowers/
+docs/branch-progress/
+.claude/
+artifacts/
 *.log
 *.pem
 *.key
