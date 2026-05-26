@@ -497,7 +497,18 @@ function loadAuthConfig() {
   try {
     if (fs.existsSync(AUTH_CONFIG_PATH)) {
       const config = JSON.parse(fs.readFileSync(AUTH_CONFIG_PATH, 'utf8'));
-      if (config.password) return config;
+      if (config.password) {
+        // If CC_WEB_PASSWORD is explicitly set and different, migrate it.
+        // This handles the case where the deploy wizard writes a new password
+        // to .env while auth.json still has an old auto-generated password.
+        const envPw = process.env.CC_WEB_PASSWORD;
+        if (envPw && envPw !== 'changeme' && envPw !== config.password) {
+          config.password = envPw;
+          config.mustChange = false;
+          saveAuthConfig(config);
+        }
+        return config;
+      }
     }
   } catch {}
 
