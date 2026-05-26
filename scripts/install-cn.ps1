@@ -216,7 +216,9 @@ function Set-EnvValue {
   if (-not $replaced) {
     $output += "${Key}=${Value}"
   }
-  Set-Content -LiteralPath $FilePath -Value ($output -join "`n") -NoNewline
+  # Use platform-native line endings (CRLF on Windows) so the file
+  # looks correct in Notepad and other Windows editors.
+  $output | Set-Content -LiteralPath $FilePath
 }
 
 function Prepare-EnvFile {

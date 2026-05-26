@@ -282,11 +282,21 @@ prepare_env_file() {
   fi
 }
 
-# Set or update a KEY=VALUE line in an env file (idempotent)
+# Set or update a KEY=VALUE line in an env file (idempotent).
+# Uses pure bash, no sed — works on both Linux and macOS.
 set_env_value() {
   local file="$1" key="$2" value="$3"
   if grep -q "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    local temp_file
+    temp_file="$(mktemp)"
+    while IFS='' read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ ^"${key}"=.* ]]; then
+        echo "${key}=${value}"
+      else
+        echo "$line"
+      fi
+    done < "$file" > "$temp_file"
+    mv "$temp_file" "$file"
   else
     echo "${key}=${value}" >> "$file"
   fi
