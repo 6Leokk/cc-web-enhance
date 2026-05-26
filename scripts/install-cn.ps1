@@ -1,3 +1,4 @@
+# cc-web-enhance install-cn.ps1 v2
 param(
   [switch]$Start,
   [switch]$WithFrp,
