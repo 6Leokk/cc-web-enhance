@@ -185,12 +185,12 @@ install_or_update_repo() {
     git -C "$INSTALL_DIR" checkout --track "origin/$BRANCH"
   fi
 
-  echo "[install-cn] Git pull (via proxy)..."
+  echo "[install-cn] Git pull --ff-only (via proxy)..."
   if ! try_git -C "$INSTALL_DIR" -c "$proxy_insteadof" pull --ff-only origin "$BRANCH"; then
     echo "[install-cn] Proxy pull failed, retrying direct..."
     if ! try_git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"; then
-      echo "[install-cn] Git pull failed both via proxy and direct. Check your network." >&2
-      exit 1
+      echo "[install-cn] Branch diverged from remote (likely rebase). Resetting to match origin..."
+      git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
     fi
   fi
 }

@@ -112,12 +112,13 @@ function Invoke-GitWithFallback {
     [string[]]$ProxyArgs,
     [string[]]$DirectArgs,
     [string]$Description,
-    [string]$CleanupPath = ''
+    [string]$CleanupPath = '',
+    [switch]$NoThrow
   )
 
   Write-Info "$Description (via proxy)..."
   $ok = Try-Git -Arguments $ProxyArgs
-  if ($ok) { return }
+  if ($ok) { return $true }
 
   if ($CleanupPath -and (Test-Path -LiteralPath $CleanupPath)) {
     Write-Info "Cleaning up partial directory from failed proxy attempt..."
@@ -127,8 +128,10 @@ function Invoke-GitWithFallback {
   Write-Info "Proxy failed, retrying $Description direct..."
   $ok = Try-Git -Arguments $DirectArgs
   if (-not $ok) {
+    if ($NoThrow) { return $false }
     throw "$Description failed both via proxy and direct. Check your network."
   }
+  return $true
 }
 
 function Install-OrUpdateRepo {
@@ -167,10 +170,17 @@ function Install-OrUpdateRepo {
     Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'checkout', '--track', "origin/$Branch")
   }
 
-  Invoke-GitWithFallback `
+  Write-Info 'Updating to latest...'
+  $pulled = Invoke-GitWithFallback `
     -ProxyArgs @('-C', $InstallDir, '-c', $proxyInsteadOf, 'pull', '--ff-only', 'origin', $Branch) `
     -DirectArgs @('-C', $InstallDir, 'pull', '--ff-only', 'origin', $Branch) `
-    -Description 'Git pull --ff-only'
+    -Description 'Git pull --ff-only' `
+    -NoThrow
+
+  if (-not $pulled) {
+    Write-Info 'Branch diverged from remote (likely rebase). Resetting to match origin...'
+    Invoke-Checked -FilePath 'git' -Arguments @('-C', $InstallDir, 'reset', '--hard', "origin/$Branch")
+  }
 }
 
 function Prepare-EnvFile {
