@@ -68,13 +68,13 @@ npm start
 同时准备内置 frp：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -WithFrp"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -WithFrp"
 ```
 
-安装器 `scripts/install-cn.ps1` 会先拉取或更新仓库，然后调用 `scripts\deploy\windows-cn.cmd`。它默认会重新安装依赖；如果要保留已有 `node_modules` 和 frp 下载缓存：
+安装器 `scripts/install-cn.ps1` 会先拉取或更新仓库，然后调用 `scripts\deploy\windows-cn.cmd`。它不会删除已有的 `node_modules`，只会补充安装缺失的包。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -NoReset -Start"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -NoReset -Start"
 ```
 
 只从你信任的仓库执行远程 PowerShell 脚本。想先检查内容，可以打开 `scripts/install-cn.ps1` 看完再运行。
@@ -181,6 +181,12 @@ bash scripts/deploy/linux-cn.sh --no-reset
 npm run start:ngrok
 ```
 
+如果已经配过但需要重设访问模式或 ngrok token：
+
+```bash
+npm run reconfigure
+```
+
 纯命令行配置：
 
 ```bash
@@ -207,6 +213,7 @@ frp 详细步骤见 [docs/deploy-frp.md](./docs/deploy-frp.md)。
 
 ```bash
 npm start                 # 启动 cc-web
+npm run reconfigure       # 重新配置访问模式、ngrok token 等（交互式向导）
 npm run start:ngrok       # 配置并启动 ngrok 模式
 npm run setup:ngrok       # 只写入 ngrok 配置，不启动
 npm run deploy:cn         # 国内依赖安装 preset

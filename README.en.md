@@ -68,13 +68,13 @@ npm start
 Prepare built-in frp during installation:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -WithFrp"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -WithFrp"
 ```
 
-The bootstrap installer `scripts/install-cn.ps1` checks out or updates this repository, then delegates dependency setup to `scripts\deploy\windows-cn.cmd`. It reinstalls dependencies by default. To keep existing `node_modules` and frp download cache:
+The bootstrap installer `scripts/install-cn.ps1` checks out or updates this repository, then delegates dependency setup to `scripts\deploy\windows-cn.cmd`. It does not delete existing `node_modules`.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1'))) -NoReset -Start"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1?v=2'))) -NoReset -Start"
 ```
 
 Only run remote PowerShell scripts from repositories you trust. If you want to inspect it first, read `scripts/install-cn.ps1` before running it.
@@ -157,10 +157,10 @@ The bootstrap installer `scripts/install-cn.sh` checks out or updates this repos
 npm install --registry=https://registry.npmmirror.com
 ```
 
-It defaults to `--reset`, removing `node_modules`, `frp/bin`, and `frp/tmp` before reinstalling. It does not remove `.env`, `config/`, `sessions/`, `logs/`, or `frp/conf/`. To keep existing install artifacts:
+It does not delete existing `node_modules` by default. To force a full rebuild:
 
 ```bash
-bash scripts/deploy/linux-cn.sh --no-reset
+bash scripts/deploy/linux-cn.sh --reset
 ```
 
 ## Remote Access
@@ -179,6 +179,12 @@ Fast ngrok start:
 
 ```bash
 npm run start:ngrok
+```
+
+To reconfigure access mode or ngrok token:
+
+```bash
+npm run reconfigure
 ```
 
 Command-line ngrok setup:
@@ -207,6 +213,7 @@ See [docs/deploy-frp.md](./docs/deploy-frp.md) for the full frp guide.
 
 ```bash
 npm start                 # Start cc-web
+npm run reconfigure       # Reconfigure access mode, ngrok token, etc. (interactive wizard)
 npm run start:ngrok       # Configure and start ngrok mode
 npm run setup:ngrok       # Write ngrok config only
 npm run deploy:cn         # Mainland dependency install preset
