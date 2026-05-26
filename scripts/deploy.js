@@ -329,12 +329,11 @@ function hiddenQuestion(promptText) {
       output: process.stdout,
       terminal: true,
     });
-    const originalWrite = rl._writeToOutput;
-    rl._writeToOutput = function writeHidden(text) {
-      if (String(text).includes(promptText)) {
-        originalWrite.call(rl, text);
+    rl._writeToOutput = function _writeToOutput(stringToWrite) {
+      if (stringToWrite === promptText || stringToWrite === '\r\n' || stringToWrite === '\n') {
+        rl.output.write(stringToWrite);
       } else {
-        originalWrite.call(rl, '*');
+        rl.output.write('*'.repeat(Math.max(1, String(stringToWrite).length)));
       }
     };
     rl.question(promptText, (answer) => {
