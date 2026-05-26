@@ -277,6 +277,9 @@ async function runDeploy(options = {}) {
   const envIsUnconfigured = envExists && exampleExists
     && fs.readFileSync(envPath, 'utf8') === fs.readFileSync(examplePath, 'utf8');
 
+  // reconfigure is for config changes only — skip reset, don't remove anything
+  if (options.reconfigure) options.reset = false;
+
   if ((options.reconfigure || !envExists || envIsUnconfigured) && !options.nonInteractive && process.stdin.isTTY) {
     try {
       const wizardEnv = await runSetupWizard(options);
