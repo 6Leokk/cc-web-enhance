@@ -267,6 +267,18 @@ function runRemovePath(step, options = {}) {
   console.log(`[deploy] Reset ${step.target}`);
 }
 
+function hasMissingDeps(cwd) {
+  const pkgPath = path.join(cwd, 'package.json');
+  if (!fs.existsSync(pkgPath)) return false;
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  for (const depName of Object.keys(deps)) {
+    const pkgJson = path.join(cwd, 'node_modules', depName, 'package.json');
+    if (!fs.existsSync(pkgJson)) return true;
+  }
+  return false;
+}
+
 async function runDeploy(options = {}) {
   const cwd = options.cwd || REPO_ROOT;
   const envPath = path.join(cwd, '.env');
@@ -313,11 +325,23 @@ async function runDeploy(options = {}) {
     envExists: fs.existsSync(envPath),
   });
 
+  let ranNpmInstall = false;
   for (const warning of plan.warnings) console.warn(`[deploy] ${warning}`);
   for (const step of plan.steps) {
     if (step.type === 'file-copy') runFileCopy(step, { cwd });
     else if (step.type === 'remove-path') runRemovePath(step, { cwd });
-    else runCommand(step, { cwd });
+    else {
+      if (step.id === 'npm-install') ranNpmInstall = true;
+      runCommand(step, { cwd });
+    }
+  }
+
+  // After npm install, verify dependencies are actually present.
+  // Stale lockfiles or mirror issues can leave deps missing even when npm exits 0.
+  if (ranNpmInstall && !options.skipInstall && hasMissingDeps(cwd)) {
+    console.warn('\n[deploy] WARNING: some dependencies are missing after npm install');
+    console.warn('[deploy] Your node_modules may be stale — try running with --reset to force a clean reinstall');
+    console.warn('[deploy] cd $REPO_ROOT && node scripts/deploy.js --profile ${options.profile} --reset --start');
   }
 
   console.log('\n[deploy] Deployment preset finished.');
