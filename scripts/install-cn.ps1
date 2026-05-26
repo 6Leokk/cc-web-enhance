@@ -102,7 +102,7 @@ function Ensure-InstallParent {
 
 function Try-Git {
   param([string[]]$Arguments)
-  & git @Arguments 2>&1 | Out-Null
+  & git @Arguments *>$null
   return $LASTEXITCODE -eq 0
 }
 
