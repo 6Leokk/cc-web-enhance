@@ -279,7 +279,7 @@ async function runDeploy(options = {}) {
 
   // Detect broken config: mode is set but required secrets are missing or corrupted
   let fileEnv = readEnvFile(envPath);
-  const modeNeedsToken = fileEnv.CC_WEB_ACCESS_MODE === 'ngrok' && !fileEnv.NGROK_AUTHTOKEN;
+  const modeNeedsToken = fileEnv.CC_WEB_ACCESS_MODE === 'ngrok' && (!fileEnv.NGROK_AUTHTOKEN || fileEnv.NGROK_AUTHTOKEN.includes('*'));
   const modeNeedsFrpServer = fileEnv.CC_WEB_ACCESS_MODE === 'frp' && !fileEnv.FRP_SERVER_ADDR;
   const envIsBroken = envExists && (modeNeedsToken || modeNeedsFrpServer);
 
