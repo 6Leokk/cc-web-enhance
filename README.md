@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create
 如果 raw.githubusercontent.com 访问不稳定，可使用代理入口（自动超时回退）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((try{irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}))) -Start"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "`$s=try{irm 'https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}catch{irm 'https://gh-proxy.com/https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/install-cn.ps1' -TimeoutSec 15}; & ([scriptblock]::Create(`$s)) -Start"
 ```
 
 默认安装目录：
