@@ -157,10 +157,10 @@ curl -fsSL https://raw.githubusercontent.com/6Leokk/cc-web-enhance/main/scripts/
 npm install --registry=https://registry.npmmirror.com
 ```
 
-它默认带 `--reset`，会删除 `node_modules`、`frp/bin`、`frp/tmp` 后重新安装；不会删除 `.env`、`config/`、`sessions/`、`logs/`、`frp/conf/`。如果要保留已有安装产物：
+它默认不会删除已有的 `node_modules`，只补充安装缺失的包。如需强制完全重装：
 
 ```bash
-bash scripts/deploy/linux-cn.sh --no-reset
+bash scripts/deploy/linux-cn.sh --reset
 ```
 
 ## 远程访问
