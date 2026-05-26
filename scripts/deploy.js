@@ -315,6 +315,16 @@ async function runDeploy(options = {}) {
   }
 
   fileEnv = readEnvFile(envPath);
+
+  // Detect stale node_modules: package.json has new deps not yet installed.
+  // Without this, `npm install` may say "up to date" and skip installing
+  // newly added dependencies when the lockfile is outdated.
+  const nmPath = path.join(cwd, 'node_modules');
+  if (fs.existsSync(nmPath) && !options.skipInstall && hasMissingDeps(cwd)) {
+    console.warn('\n[deploy] Dependencies changed since last install. Removing node_modules for clean reinstall...');
+    fs.rmSync(nmPath, { recursive: true, force: true });
+  }
+
   const mergedEnv = { ...process.env, ...fileEnv };
   const withFrp = options.withFrp === null || options.withFrp === undefined
     ? isFrpRequested(mergedEnv)
@@ -339,9 +349,24 @@ async function runDeploy(options = {}) {
   // After npm install, verify dependencies are actually present.
   // Stale lockfiles or mirror issues can leave deps missing even when npm exits 0.
   if (ranNpmInstall && !options.skipInstall && hasMissingDeps(cwd)) {
-    console.warn('\n[deploy] WARNING: some dependencies are missing after npm install');
-    console.warn('[deploy] Your node_modules may be stale — try running with --reset to force a clean reinstall');
-    console.warn('[deploy] cd $REPO_ROOT && node scripts/deploy.js --profile ${options.profile} --reset --start');
+    console.warn('\n[deploy] Dependencies missing — node_modules is stale. Force-cleaning and reinstalling...');
+    const nodeModulesPath = resolveRepoTarget(cwd, 'node_modules');
+    fs.rmSync(nodeModulesPath, { recursive: true, force: true });
+    const reinstallArgs = ['install'];
+    const npmRegistry = options.npmRegistry || '';
+    if (npmRegistry) reinstallArgs.push(`--registry=${npmRegistry}`);
+    runCommand({
+      id: 'npm-install-fix',
+      type: 'command',
+      command: 'npm',
+      args: reinstallArgs,
+      env: {},
+      message: 'Reinstall dependencies (force clean)',
+    }, { cwd });
+    if (hasMissingDeps(cwd)) {
+      console.error('[deploy] ERROR: dependencies still missing after forced reinstall. Check your network / npm registry.\n');
+      process.exit(1);
+    }
   }
 
   console.log('\n[deploy] Deployment preset finished.');
