@@ -432,10 +432,6 @@ async function runSetupWizard(options = {}) {
       const token = await hiddenQuestion(rl, t.ngrokToken);
       if (!token) throw new Error(t.ngrokTokenErr);
       env.NGROK_AUTHTOKEN = token;
-      const domain = await question(rl, t.ngrokDomain);
-      if (domain) env.NGROK_DOMAIN = domain;
-      const basicAuth = await question(rl, t.ngrokAuth);
-      if (basicAuth) env.NGROK_BASIC_AUTH = basicAuth;
       env.NGROK_AUTO_START = '1';
     } else if (modeChoice === '3') {
       env.CC_WEB_ACCESS_MODE = 'frp';
