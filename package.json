@@ -42,6 +42,8 @@
     "regression:setup-ngrok": "node scripts/setup-ngrok-regression.js",
     "deploy:global": "node scripts/deploy.js --profile global --reset",
     "deploy:cn": "node scripts/deploy.js --profile cn --reset",
+    "reconfigure": "node scripts/deploy.js --profile cn --reconfigure --start",
+    "reconfigure:global": "node scripts/deploy.js --profile global --reconfigure --start",
     "setup:ngrok": "node scripts/setup-ngrok.js",
     "start:ngrok": "node scripts/setup-ngrok.js --start",
     "frp:download": "node scripts/frp-download.js",
