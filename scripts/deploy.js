@@ -277,14 +277,20 @@ async function runDeploy(options = {}) {
   const envIsUnconfigured = envExists && exampleExists
     && fs.readFileSync(envPath, 'utf8') === fs.readFileSync(examplePath, 'utf8');
 
+  // Detect broken config: mode is set but required secrets are missing or corrupted
+  let fileEnv = readEnvFile(envPath);
+  const modeNeedsToken = fileEnv.CC_WEB_ACCESS_MODE === 'ngrok' && !fileEnv.NGROK_AUTHTOKEN;
+  const modeNeedsFrpServer = fileEnv.CC_WEB_ACCESS_MODE === 'frp' && !fileEnv.FRP_SERVER_ADDR;
+  const envIsBroken = envExists && (modeNeedsToken || modeNeedsFrpServer);
+
   // reconfigure is for config changes only — skip reset, don't remove anything
   if (options.reconfigure) options.reset = false;
 
-  if ((options.reconfigure || !envExists || envIsUnconfigured) && !options.nonInteractive && process.stdin.isTTY) {
+  if ((options.reconfigure || !envExists || envIsUnconfigured || envIsBroken) && !options.nonInteractive && process.stdin.isTTY) {
     try {
       const wizardEnv = await runSetupWizard(options);
       if (wizardEnv) {
-        if (exampleExists && !envExists) {
+        if (exampleExists && (!envExists || envIsBroken)) {
           fs.copyFileSync(examplePath, envPath);
         }
         writeEnvFile(envPath, wizardEnv);
@@ -296,7 +302,7 @@ async function runDeploy(options = {}) {
     }
   }
 
-  const fileEnv = readEnvFile(envPath);
+  fileEnv = readEnvFile(envPath);
   const mergedEnv = { ...process.env, ...fileEnv };
   const withFrp = options.withFrp === null || options.withFrp === undefined
     ? isFrpRequested(mergedEnv)
