@@ -211,18 +211,18 @@ See [docs/deploy-frp.md](./docs/deploy-frp.md) for the full frp guide.
 
 ## Reset Configuration
 
-Delete the `.env` file and restart — the setup wizard will appear automatically:
+Delete the `.env` file and run `npm run reconfigure` — the setup wizard will appear, then the server starts:
 
 ```powershell
 # Windows
 Remove-Item -Force "$env:LOCALAPPDATA\cc-web-enhance\.env"
-npm start
+npm run reconfigure
 ```
 
 ```bash
 # Linux / macOS
 rm -f /opt/cc-web-enhance/.env
-npm start
+npm run reconfigure
 ```
 
 Or use `npm run reconfigure` to reconfigure directly (no file deletion needed).

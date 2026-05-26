@@ -211,18 +211,18 @@ frp 详细步骤见 [docs/deploy-frp.md](./docs/deploy-frp.md)。
 
 ## 重置配置
 
-删除 `.env` 文件后重启，安装脚本会自动弹出配置向导：
+删除 `.env` 文件后运行 `npm run reconfigure`，会自动弹出配置向导并启动服务：
 
 ```powershell
 # Windows
 Remove-Item -Force "$env:LOCALAPPDATA\cc-web-enhance\.env"
-npm start
+npm run reconfigure
 ```
 
 ```bash
 # Linux / macOS
 rm -f /opt/cc-web-enhance/.env
-npm start
+npm run reconfigure
 ```
 
 或者用 `npm run reconfigure` 直接重新配置（不需要删文件）。
